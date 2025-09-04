@@ -1,0 +1,11 @@
+{
+   "script": "bin/www",
+   "watch": true,
+   "ignore_watch": ["node_modules", "public"],
+   "watch_options": {
+      "followSymlinks": false
+   },
+   "max_memory_restart": "180M",
+   "node_args": ["--max_old_space_size=200"],
+   "name": "PolarNet-Server"
+}

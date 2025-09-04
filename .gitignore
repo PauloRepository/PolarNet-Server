@@ -1,0 +1,59 @@
+# Node.js dependencies
+/node_modules
+/npm-debug.log
+/yarn-error.log
+/pnpm-debug.log
+/.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.pid.lock
+/coverage/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.swp
+
+# Editor settings
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Build output
+dist/
+build/
+
+# Debug and test artifacts
+.nyc_output
+coverage/
+
+# Express generated logs
+/logs/
+*.log
+
+# Optional: Ignore environment-specific settings
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Optional: Ignore Express session storage (if using sessions)
+sessions/
+
+# Ignore PM2 process manager logs (if used)
+.pm2/
