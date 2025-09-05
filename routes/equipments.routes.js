@@ -1,5 +1,5 @@
 const express = require('express');
-const equipmentController = require('../controllers/equipmentController');
+const equipmentController = require('../controllers/equipment.controller');
 const { authenticateToken, requireEmpresaOrTecnico } = require('../helpers/auth');
 
 const router = express.Router();
