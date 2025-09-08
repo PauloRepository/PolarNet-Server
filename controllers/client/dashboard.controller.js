@@ -1,4 +1,4 @@
-const pool = require('../../lib/db');
+const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
 
 class ClientDashboardController {
@@ -6,43 +6,48 @@ class ClientDashboardController {
   // GET /api/client/dashboard - Dashboard principal del cliente
   async getDashboardData(req, res) {
     try {
-      const clientUserId = req.user.user_id;
+      const clientUserId = req.user.id;
       const clientCompanyId = req.user.company_id;
+
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
 
       // Obtener métricas generales del cliente
       const metricsQuery = `
         SELECT 
           -- Equipos
           COUNT(DISTINCT e.equipment_id) as total_equipments,
-          COUNT(DISTINCT CASE WHEN e.status = 'ACTIVO' THEN e.equipment_id END) as active_equipments,
-          COUNT(DISTINCT CASE WHEN e.status = 'MANTENIMIENTO' THEN e.equipment_id END) as maintenance_equipments,
-          COUNT(DISTINCT CASE WHEN e.status = 'INACTIVO' THEN e.equipment_id END) as inactive_equipments,
+          COUNT(DISTINCT CASE WHEN e.status = 'ACTIVE' THEN e.equipment_id END) as active_equipments,
+          COUNT(DISTINCT CASE WHEN e.status = 'MAINTENANCE' THEN e.equipment_id END) as maintenance_equipments,
+          COUNT(DISTINCT CASE WHEN e.status = 'INACTIVE' THEN e.equipment_id END) as inactive_equipments,
           
           -- Solicitudes de servicio
-          COUNT(DISTINCT sr.request_id) as total_service_requests,
-          COUNT(DISTINCT CASE WHEN sr.status = 'PENDIENTE' THEN sr.request_id END) as pending_requests,
-          COUNT(DISTINCT CASE WHEN sr.status = 'EN_PROCESO' THEN sr.request_id END) as in_progress_requests,
-          COUNT(DISTINCT CASE WHEN sr.status = 'COMPLETADO' THEN sr.request_id END) as completed_requests,
+          COUNT(DISTINCT sr.service_request_id) as total_service_requests,
+          COUNT(DISTINCT CASE WHEN sr.status = 'OPEN' THEN sr.service_request_id END) as pending_requests,
+          COUNT(DISTINCT CASE WHEN sr.status = 'IN_PROGRESS' THEN sr.service_request_id END) as in_progress_requests,
+          COUNT(DISTINCT CASE WHEN sr.status = 'CLOSED' THEN sr.service_request_id END) as completed_requests,
           
           -- Mantenimientos
           COUNT(DISTINCT m.maintenance_id) as total_maintenances,
-          COUNT(DISTINCT CASE WHEN m.status = 'PROGRAMADO' THEN m.maintenance_id END) as scheduled_maintenances,
-          COUNT(DISTINCT CASE WHEN m.status = 'COMPLETADO' THEN m.maintenance_id END) as completed_maintenances,
+          COUNT(DISTINCT CASE WHEN m.status = 'SCHEDULED' THEN m.maintenance_id END) as scheduled_maintenances,
+          COUNT(DISTINCT CASE WHEN m.status = 'DONE' THEN m.maintenance_id END) as completed_maintenances,
           
           -- Alertas de temperatura
           COUNT(DISTINCT CASE 
-            WHEN tr.temperature > 25 OR tr.temperature < -18 THEN tr.reading_id 
+            WHEN tr.value > 25 OR tr.value < -18 THEN tr.temperature_reading_id 
           END) as temperature_alerts,
           
           -- Consumo energético promedio (últimos 30 días)
-          AVG(er.energy_consumption) as avg_energy_consumption
+          AVG(er.consumption) as avg_energy_consumption
         FROM equipments e
         LEFT JOIN service_requests sr ON e.equipment_id = sr.equipment_id
         LEFT JOIN maintenances m ON e.equipment_id = m.equipment_id
         LEFT JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id 
-          AND tr.reading_date >= NOW() - INTERVAL '24 hours'
+          AND tr.timestamp >= NOW() - INTERVAL '24 hours'
         LEFT JOIN energy_readings er ON e.equipment_id = er.equipment_id
-          AND er.reading_date >= NOW() - INTERVAL '30 days'
+          AND er.timestamp >= NOW() - INTERVAL '30 days'
         WHERE e.company_id = $1
       `;
 
@@ -50,38 +55,37 @@ class ClientDashboardController {
       const upcomingMaintenancesQuery = `
         SELECT 
           m.maintenance_id,
-          m.maintenance_type,
-          m.scheduled_date,
-          m.description,
-          e.equipment_name,
-          e.equipment_type,
-          u.first_name as technician_first_name,
-          u.last_name as technician_last_name
+          m.type as maintenance_type,
+          m.date as scheduled_date,
+          m.notes as description,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          u.name as technician_name
         FROM maintenances m
         INNER JOIN equipments e ON m.equipment_id = e.equipment_id
-        LEFT JOIN users u ON m.technician_user_id = u.user_id
+        LEFT JOIN users u ON m.maintenance_id = u.user_id
         WHERE e.company_id = $1 
-        AND m.status = 'PROGRAMADO'
-        AND m.scheduled_date >= NOW()
-        ORDER BY m.scheduled_date ASC
+        AND m.status = 'SCHEDULED'
+        AND m.date >= NOW()
+        ORDER BY m.date ASC
         LIMIT 5
       `;
 
       // Solicitudes recientes
       const recentRequestsQuery = `
         SELECT 
-          sr.request_id,
-          sr.request_type,
+          sr.service_request_id as request_id,
+          sr.issue_type as request_type,
           sr.priority,
           sr.status,
           sr.description,
-          sr.created_at,
-          e.equipment_name,
-          e.equipment_type
+          sr.request_date as created_at,
+          e.name as equipment_name,
+          e.type as equipment_type
         FROM service_requests sr
         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
         WHERE e.company_id = $1
-        ORDER BY sr.created_at DESC
+        ORDER BY sr.request_date DESC
         LIMIT 5
       `;
 
@@ -89,30 +93,30 @@ class ClientDashboardController {
       const criticalTemperaturesQuery = `
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
-          e.equipment_name,
-          tr.temperature,
-          tr.reading_date,
-          el.location_name
+          e.name as equipment_name,
+          tr.value as temperature,
+          tr.timestamp as reading_date,
+          el.address as location_name
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        AND (tr.temperature > 25 OR tr.temperature < -18)
-        AND tr.reading_date >= NOW() - INTERVAL '2 hours'
-        ORDER BY e.equipment_id, tr.reading_date DESC
+        AND (tr.value > 25 OR tr.value < -18)
+        AND tr.timestamp >= NOW() - INTERVAL '2 hours'
+        ORDER BY e.equipment_id, tr.timestamp DESC
         LIMIT 10
       `;
 
       // Consumo energético del día
       const todayEnergyQuery = `
         SELECT 
-          SUM(er.energy_consumption) as total_consumption,
-          AVG(er.energy_consumption) as avg_consumption,
-          COUNT(er.reading_id) as total_readings
+          SUM(er.consumption) as total_consumption,
+          AVG(er.consumption) as avg_consumption,
+          COUNT(er.energy_reading_id) as total_readings
         FROM energy_readings er
         INNER JOIN equipments e ON er.equipment_id = e.equipment_id
         WHERE e.company_id = $1
-        AND DATE(er.reading_date) = CURRENT_DATE
+        AND DATE(er.timestamp) = CURRENT_DATE
       `;
 
       const [
@@ -132,7 +136,7 @@ class ClientDashboardController {
       const metrics = metricsResult.rows[0];
       const todayEnergy = todayEnergyResult.rows[0];
 
-      return ResponseHandler.success(res, 'Dashboard del cliente obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         metrics: {
           equipments: {
             total: parseInt(metrics.total_equipments) || 0,
@@ -164,7 +168,7 @@ class ClientDashboardController {
         upcomingMaintenances: upcomingMaintenancesResult.rows,
         recentServiceRequests: recentRequestsResult.rows,
         criticalTemperatures: criticalTemperaturesResult.rows
-      });
+      }, 'Dashboard del cliente obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getDashboardData:', error);
@@ -177,14 +181,19 @@ class ClientDashboardController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
+
       const metricsQuery = `
         SELECT 
           COUNT(DISTINCT e.equipment_id) as total_equipments,
-          COUNT(DISTINCT CASE WHEN e.status = 'ACTIVO' THEN e.equipment_id END) as active_equipments,
-          COUNT(DISTINCT sr.request_id) as total_requests,
-          COUNT(DISTINCT CASE WHEN sr.status = 'PENDIENTE' THEN sr.request_id END) as pending_requests,
+          COUNT(DISTINCT CASE WHEN e.status = 'ACTIVE' THEN e.equipment_id END) as active_equipments,
+          COUNT(DISTINCT sr.service_request_id) as total_requests,
+          COUNT(DISTINCT CASE WHEN sr.status = 'OPEN' THEN sr.service_request_id END) as pending_requests,
           COUNT(DISTINCT m.maintenance_id) as total_maintenances,
-          COUNT(DISTINCT CASE WHEN m.scheduled_date > NOW() AND m.status = 'PROGRAMADO' THEN m.maintenance_id END) as upcoming_maintenances
+          COUNT(DISTINCT CASE WHEN m.date > NOW() AND m.status = 'SCHEDULED' THEN m.maintenance_id END) as upcoming_maintenances
         FROM equipments e
         LEFT JOIN service_requests sr ON e.equipment_id = sr.equipment_id
         LEFT JOIN maintenances m ON e.equipment_id = m.equipment_id
@@ -194,14 +203,14 @@ class ClientDashboardController {
       const result = await pool.query(metricsQuery, [clientCompanyId]);
       const metrics = result.rows[0];
 
-      return ResponseHandler.success(res, 'Métricas obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         totalEquipments: parseInt(metrics.total_equipments) || 0,
         activeEquipments: parseInt(metrics.active_equipments) || 0,
         totalRequests: parseInt(metrics.total_requests) || 0,
         pendingRequests: parseInt(metrics.pending_requests) || 0,
         totalMaintenances: parseInt(metrics.total_maintenances) || 0,
         upcomingMaintenances: parseInt(metrics.upcoming_maintenances) || 0
-      });
+      }, 'Métricas obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getDashboardMetrics:', error);
@@ -214,36 +223,41 @@ class ClientDashboardController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
+
       const temperatureQuery = `
         SELECT 
           e.equipment_id,
-          e.equipment_name,
-          tr.temperature,
-          tr.reading_date,
-          el.location_name,
+          e.name as equipment_name,
+          tr.value as temperature,
+          tr.timestamp as reading_date,
+          el.address as location_name,
           CASE 
-            WHEN tr.temperature > 25 OR tr.temperature < -18 THEN 'CRITICAL'
-            WHEN tr.temperature > 20 OR tr.temperature < -15 THEN 'WARNING'
+            WHEN tr.value > 25 OR tr.value < -18 THEN 'CRITICAL'
+            WHEN tr.value > 20 OR tr.value < -15 THEN 'WARNING'
             ELSE 'NORMAL'
           END as status
         FROM equipments e
         INNER JOIN (
           SELECT DISTINCT ON (equipment_id) 
-            equipment_id, temperature, reading_date
+            equipment_id, value, timestamp
           FROM temperature_readings 
-          WHERE reading_date >= NOW() - INTERVAL '2 hours'
-          ORDER BY equipment_id, reading_date DESC
+          WHERE timestamp >= NOW() - INTERVAL '2 hours'
+          ORDER BY equipment_id, timestamp DESC
         ) tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        ORDER BY tr.reading_date DESC
+        ORDER BY tr.timestamp DESC
       `;
 
       const result = await pool.query(temperatureQuery, [clientCompanyId]);
 
-      return ResponseHandler.success(res, 'Datos de temperatura obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         temperatureReadings: result.rows
-      });
+      }, 'Datos de temperatura obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getTemperatureData:', error);
@@ -256,31 +270,36 @@ class ClientDashboardController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
+
       const energyQuery = `
         SELECT 
           e.equipment_id,
-          e.equipment_name,
-          er.energy_consumption,
-          er.reading_date,
-          el.location_name
+          e.name as equipment_name,
+          er.consumption as energy_consumption,
+          er.timestamp as reading_date,
+          el.address as location_name
         FROM equipments e
         INNER JOIN (
           SELECT DISTINCT ON (equipment_id) 
-            equipment_id, energy_consumption, reading_date
+            equipment_id, consumption, timestamp
           FROM energy_readings 
-          WHERE reading_date >= NOW() - INTERVAL '24 hours'
-          ORDER BY equipment_id, reading_date DESC
+          WHERE timestamp >= NOW() - INTERVAL '24 hours'
+          ORDER BY equipment_id, timestamp DESC
         ) er ON e.equipment_id = er.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        ORDER BY er.reading_date DESC
+        ORDER BY er.timestamp DESC
       `;
 
       const result = await pool.query(energyQuery, [clientCompanyId]);
 
-      return ResponseHandler.success(res, 'Datos de energía obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         energyReadings: result.rows
-      });
+      }, 'Datos de energía obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getEnergyData:', error);
@@ -293,29 +312,34 @@ class ClientDashboardController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
+
       const requestsQuery = `
         SELECT 
-          sr.request_id,
-          sr.request_type,
+          sr.service_request_id as request_id,
+          sr.issue_type as request_type,
           sr.priority,
           sr.status,
           sr.description,
-          sr.created_at,
+          sr.request_date as created_at,
           sr.scheduled_date,
-          e.equipment_name,
-          e.equipment_type
+          e.name as equipment_name,
+          e.type as equipment_type
         FROM service_requests sr
         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
         WHERE e.company_id = $1
-        ORDER BY sr.created_at DESC
+        ORDER BY sr.request_date DESC
         LIMIT 10
       `;
 
       const result = await pool.query(requestsQuery, [clientCompanyId]);
 
-      return ResponseHandler.success(res, 'Solicitudes recientes obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         serviceRequests: result.rows
-      });
+      }, 'Solicitudes recientes obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getRecentServiceRequests:', error);
@@ -328,33 +352,37 @@ class ClientDashboardController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      // Validar que el usuario tenga una empresa asignada
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Usuario no tiene empresa asignada', 'NO_COMPANY_ASSIGNED', 400);
+      }
+
       const maintenancesQuery = `
         SELECT 
           m.maintenance_id,
-          m.maintenance_type,
-          m.scheduled_date,
-          m.description,
-          e.equipment_name,
-          e.equipment_type,
-          u.first_name as technician_first_name,
-          u.last_name as technician_last_name,
-          el.location_name
+          m.type as maintenance_type,
+          m.date as scheduled_date,
+          m.notes as description,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          u.name as technician_name,
+          el.address as location_name
         FROM maintenances m
         INNER JOIN equipments e ON m.equipment_id = e.equipment_id
-        LEFT JOIN users u ON m.technician_user_id = u.user_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN users u ON m.maintenance_id = u.user_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1 
-        AND m.status = 'PROGRAMADO'
-        AND m.scheduled_date >= NOW()
-        ORDER BY m.scheduled_date ASC
+        AND m.status = 'SCHEDULED'
+        AND m.date >= NOW()
+        ORDER BY m.date ASC
         LIMIT 10
       `;
 
       const result = await pool.query(maintenancesQuery, [clientCompanyId]);
 
-      return ResponseHandler.success(res, 'Próximos mantenimientos obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         upcomingMaintenances: result.rows
-      });
+      }, 'Próximos mantenimientos obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getUpcomingMaintenances:', error);

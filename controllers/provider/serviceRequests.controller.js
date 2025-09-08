@@ -1,4 +1,4 @@
-const pool = require('../../lib/db');
+const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
 
 class ProviderServiceRequestsController {

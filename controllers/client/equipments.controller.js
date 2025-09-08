@@ -1,4 +1,4 @@
-const pool = require('../../lib/db');
+const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
 
 class ClientEquipmentsController {
@@ -7,6 +7,11 @@ class ClientEquipmentsController {
   async getEquipments(req, res) {
     try {
       const clientCompanyId = req.user.company_id;
+
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const { 
         page = 1, 
         limit = 20, 
@@ -14,7 +19,7 @@ class ClientEquipmentsController {
         status = '', 
         equipment_type = '',
         location_id = '',
-        sortBy = 'equipment_name',
+        sortBy = 'name',
         sortOrder = 'asc'
       } = req.query;
 
@@ -28,7 +33,7 @@ class ClientEquipmentsController {
       if (search.trim()) {
         paramCount++;
         whereConditions.push(`(
-          e.equipment_name ILIKE $${paramCount} 
+          e.name ILIKE $${paramCount} 
           OR e.model ILIKE $${paramCount} 
           OR e.serial_number ILIKE $${paramCount}
         )`);
@@ -56,15 +61,15 @@ class ClientEquipmentsController {
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
       // Validar sortBy para prevenir SQL injection
-      const validSortFields = ['equipment_name', 'equipment_type', 'status', 'installation_date'];
-      const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'equipment_name';
+      const validSortFields = ['name', 'equipment_type', 'status', 'installation_date'];
+      const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'name';
       const safeSortOrder = sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
       // Query principal
       const equipmentsQuery = `
         SELECT 
           e.equipment_id,
-          e.equipment_name,
+          e.name,
           e.equipment_type,
           e.model,
           e.serial_number,
@@ -77,10 +82,10 @@ class ClientEquipmentsController {
           el.location_name,
           el.address as location_address,
           -- Lecturas más recientes
-          (SELECT temperature FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as current_temperature,
-          (SELECT reading_date FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as last_temperature_reading,
-          (SELECT energy_consumption FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as current_energy_consumption,
-          (SELECT reading_date FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as last_energy_reading,
+          (SELECT value FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as current_temperature,
+          (SELECT timestamp FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as last_temperature_reading,
+          (SELECT power_consumption FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as current_energy_consumption,
+          (SELECT timestamp FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as last_energy_reading,
           -- Estadísticas
           (SELECT COUNT(*) FROM service_requests WHERE equipment_id = e.equipment_id) as total_service_requests,
           (SELECT COUNT(*) FROM service_requests WHERE equipment_id = e.equipment_id AND status = 'PENDIENTE') as pending_requests,
@@ -111,7 +116,7 @@ class ClientEquipmentsController {
       const totalEquipments = parseInt(countResult.rows[0].total);
       const totalPages = Math.ceil(totalEquipments / limit);
 
-      return ResponseHandler.success(res, 'Equipos obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         equipments,
         pagination: {
           currentPage: parseInt(page),
@@ -128,7 +133,7 @@ class ClientEquipmentsController {
           sortBy: safeSortBy,
           sortOrder: safeSortOrder
         }
-      });
+      }, 'Equipos obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getEquipments:', error);
@@ -142,6 +147,10 @@ class ClientEquipmentsController {
       const { id } = req.params;
       const clientCompanyId = req.user.company_id;
 
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const equipmentQuery = `
         SELECT 
           e.*,
@@ -149,10 +158,10 @@ class ClientEquipmentsController {
           el.address as location_address,
           el.coordinates,
           -- Lecturas más recientes
-          (SELECT temperature FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as current_temperature,
-          (SELECT reading_date FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as last_temperature_reading,
-          (SELECT energy_consumption FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as current_energy_consumption,
-          (SELECT reading_date FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY reading_date DESC LIMIT 1) as last_energy_reading,
+          (SELECT value FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as current_temperature,
+          (SELECT timestamp FROM temperature_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as last_temperature_reading,
+          (SELECT power_consumption FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as current_energy_consumption,
+          (SELECT timestamp FROM energy_readings WHERE equipment_id = e.equipment_id ORDER BY timestamp DESC LIMIT 1) as last_energy_reading,
           -- Estadísticas
           (SELECT COUNT(*) FROM service_requests WHERE equipment_id = e.equipment_id) as total_service_requests,
           (SELECT COUNT(*) FROM service_requests WHERE equipment_id = e.equipment_id AND status IN ('PENDIENTE', 'EN_PROCESO')) as active_requests,
@@ -173,19 +182,19 @@ class ClientEquipmentsController {
 
       // Obtener historial reciente de temperaturas
       const temperatureHistoryQuery = `
-        SELECT temperature, reading_date
+        SELECT value as temperature, timestamp as reading_date
         FROM temperature_readings
         WHERE equipment_id = $1
-        ORDER BY reading_date DESC
+        ORDER BY timestamp DESC
         LIMIT 10
       `;
 
       // Obtener historial reciente de energía
       const energyHistoryQuery = `
-        SELECT energy_consumption, reading_date
+        SELECT power_consumption as energy_consumption, timestamp as reading_date
         FROM energy_readings
         WHERE equipment_id = $1
-        ORDER BY reading_date DESC
+        ORDER BY timestamp DESC
         LIMIT 10
       `;
 
@@ -230,13 +239,13 @@ class ClientEquipmentsController {
         pool.query(maintenancesQuery, [id])
       ]);
 
-      return ResponseHandler.success(res, 'Detalles del equipo obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         equipment,
         temperatureHistory: temperatureHistory.rows,
         energyHistory: energyHistory.rows,
         recentServiceRequests: serviceRequests.rows,
         upcomingMaintenances: maintenances.rows
-      });
+      }, 'Detalles del equipo obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getEquipmentDetails:', error);
@@ -249,6 +258,11 @@ class ClientEquipmentsController {
     try {
       const { id } = req.params;
       const clientCompanyId = req.user.company_id;
+
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const { 
         days = 7,
         limit = 100 
@@ -256,7 +270,7 @@ class ClientEquipmentsController {
 
       // Verificar que el equipo pertenece al cliente
       const equipmentQuery = `
-        SELECT equipment_id, equipment_name 
+        SELECT equipment_id, name 
         FROM equipments 
         WHERE equipment_id = $1 AND company_id = $2
       `;
@@ -269,17 +283,17 @@ class ClientEquipmentsController {
 
       const temperatureQuery = `
         SELECT 
-          temperature, 
-          reading_date,
+          value as temperature, 
+          timestamp as reading_date,
           CASE 
-            WHEN temperature > 25 OR temperature < -18 THEN 'CRITICAL'
-            WHEN temperature > 20 OR temperature < -15 THEN 'WARNING'
+            WHEN value > 25 OR value < -18 THEN 'CRITICAL'
+            WHEN value > 20 OR value < -15 THEN 'WARNING'
             ELSE 'NORMAL'
           END as status
         FROM temperature_readings
         WHERE equipment_id = $1 
-        AND reading_date >= NOW() - INTERVAL '${parseInt(days)} days'
-        ORDER BY reading_date DESC
+        AND timestamp >= NOW() - INTERVAL '${parseInt(days)} days'
+        ORDER BY timestamp DESC
         LIMIT $2
       `;
 
@@ -288,20 +302,20 @@ class ClientEquipmentsController {
       // Estadísticas del período
       const statsQuery = `
         SELECT 
-          AVG(temperature) as avg_temperature,
-          MIN(temperature) as min_temperature,
-          MAX(temperature) as max_temperature,
+          AVG(value) as avg_temperature,
+          MIN(value) as min_temperature,
+          MAX(value) as max_temperature,
           COUNT(*) as total_readings,
-          COUNT(CASE WHEN temperature > 25 OR temperature < -18 THEN 1 END) as critical_readings
+          COUNT(CASE WHEN value > 25 OR value < -18 THEN 1 END) as critical_readings
         FROM temperature_readings
         WHERE equipment_id = $1 
-        AND reading_date >= NOW() - INTERVAL '${parseInt(days)} days'
+        AND timestamp >= NOW() - INTERVAL '${parseInt(days)} days'
       `;
 
       const statsResult = await pool.query(statsQuery, [id]);
       const stats = statsResult.rows[0];
 
-      return ResponseHandler.success(res, 'Historial de temperaturas obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         equipment: equipmentResult.rows[0],
         temperatureHistory: result.rows,
         period: parseInt(days),
@@ -312,7 +326,7 @@ class ClientEquipmentsController {
           totalReadings: parseInt(stats.total_readings) || 0,
           criticalReadings: parseInt(stats.critical_readings) || 0
         }
-      });
+      }, 'Historial de temperaturas obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getEquipmentTemperatureHistory:', error);
@@ -326,6 +340,11 @@ class ClientEquipmentsController {
       const { id } = req.params;
       const clientUserId = req.user.user_id;
       const clientCompanyId = req.user.company_id;
+
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const {
         request_type,
         priority = 'MEDIA',
@@ -340,7 +359,7 @@ class ClientEquipmentsController {
 
       // Verificar que el equipo pertenece al cliente
       const equipmentQuery = `
-        SELECT equipment_id, equipment_name, status 
+        SELECT equipment_id, name, status 
         FROM equipments 
         WHERE equipment_id = $1 AND company_id = $2
       `;
@@ -381,13 +400,13 @@ class ClientEquipmentsController {
 
       const result = await pool.query(insertQuery, requestValues);
 
-      return ResponseHandler.success(res, 'Solicitud de servicio creada exitosamente', {
+      return ResponseHandler.success(res, {
         serviceRequest: result.rows[0],
         equipment: {
           equipment_id: equipment.equipment_id,
-          equipment_name: equipment.equipment_name
+          name: equipment.name
         }
-      });
+      }, 'Solicitud de servicio creada exitosamente');
 
     } catch (error) {
       console.error('Error en requestEquipmentService:', error);

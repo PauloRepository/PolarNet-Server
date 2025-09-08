@@ -1,4 +1,4 @@
-const pool = require('../../lib/db');
+const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
 
 class ClientTemperaturesController {
@@ -8,27 +8,31 @@ class ClientTemperaturesController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const temperatureQuery = `
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
-          e.equipment_name,
+          e.name as equipment_name,
           e.equipment_type,
-          tr.temperature,
-          tr.reading_date,
+          tr.value as temperature,
+          tr.timestamp as reading_date,
           el.location_name,
           el.address as location_address,
           CASE 
-            WHEN tr.temperature > 25 OR tr.temperature < -18 THEN 'CRITICAL'
-            WHEN tr.temperature > 20 OR tr.temperature < -15 THEN 'WARNING'
+            WHEN tr.value > 25 OR tr.value < -18 THEN 'CRITICAL'
+            WHEN tr.value > 20 OR tr.value < -15 THEN 'WARNING'
             ELSE 'NORMAL'
           END as status,
-          EXTRACT(EPOCH FROM (NOW() - tr.reading_date))/60 as minutes_ago
+          EXTRACT(EPOCH FROM (NOW() - tr.timestamp))/60 as minutes_ago
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
         LEFT JOIN equipment_locations el ON e.location_id = el.location_id
         WHERE e.company_id = $1
-        AND tr.reading_date >= NOW() - INTERVAL '2 hours'
-        ORDER BY e.equipment_id, tr.reading_date DESC
+        AND tr.timestamp >= NOW() - INTERVAL '2 hours'
+        ORDER BY e.equipment_id, tr.timestamp DESC
       `;
 
       const result = await pool.query(temperatureQuery, [clientCompanyId]);
@@ -37,17 +41,17 @@ class ClientTemperaturesController {
       const statsQuery = `
         SELECT 
           COUNT(*) as total_equipments,
-          COUNT(CASE WHEN tr.temperature > 25 OR tr.temperature < -18 THEN 1 END) as critical_equipments,
-          COUNT(CASE WHEN tr.temperature > 20 OR tr.temperature < -15 THEN 1 END) as warning_equipments,
-          AVG(tr.temperature) as avg_temperature,
-          MIN(tr.temperature) as min_temperature,
-          MAX(tr.temperature) as max_temperature
+          COUNT(CASE WHEN tr.value > 25 OR tr.value < -18 THEN 1 END) as critical_equipments,
+          COUNT(CASE WHEN tr.value > 20 OR tr.value < -15 THEN 1 END) as warning_equipments,
+          AVG(tr.value) as avg_temperature,
+          MIN(tr.value) as min_temperature,
+          MAX(tr.value) as max_temperature
         FROM equipments e
         INNER JOIN (
-          SELECT DISTINCT ON (equipment_id) equipment_id, temperature, reading_date
+          SELECT DISTINCT ON (equipment_id) equipment_id, value, timestamp
           FROM temperature_readings 
-          WHERE reading_date >= NOW() - INTERVAL '2 hours'
-          ORDER BY equipment_id, reading_date DESC
+          WHERE timestamp >= NOW() - INTERVAL '2 hours'
+          ORDER BY equipment_id, timestamp DESC
         ) tr ON e.equipment_id = tr.equipment_id
         WHERE e.company_id = $1
       `;
@@ -55,7 +59,7 @@ class ClientTemperaturesController {
       const statsResult = await pool.query(statsQuery, [clientCompanyId]);
       const stats = statsResult.rows[0];
 
-      return ResponseHandler.success(res, 'Temperaturas actuales obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         temperatures: result.rows,
         summary: {
           totalEquipments: parseInt(stats.total_equipments) || 0,
@@ -66,7 +70,7 @@ class ClientTemperaturesController {
           minimumTemperature: parseFloat(stats.min_temperature) || 0,
           maximumTemperature: parseFloat(stats.max_temperature) || 0
         }
-      });
+      }, 'Temperaturas actuales obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getCurrentTemperatures:', error);
@@ -79,32 +83,36 @@ class ClientTemperaturesController {
     try {
       const clientCompanyId = req.user.company_id;
 
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const alertsQuery = `
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
-          e.equipment_name,
+          e.name as equipment_name,
           e.equipment_type,
-          tr.temperature,
-          tr.reading_date,
+          tr.value as temperature,
+          tr.timestamp as reading_date,
           el.location_name,
           el.address as location_address,
           CASE 
-            WHEN tr.temperature > 25 THEN 'TEMPERATURA_ALTA'
-            WHEN tr.temperature < -18 THEN 'TEMPERATURA_BAJA'
+            WHEN tr.value > 25 THEN 'TEMPERATURA_ALTA'
+            WHEN tr.value < -18 THEN 'TEMPERATURA_BAJA'
             ELSE 'NORMAL'
           END as alert_type,
           CASE 
-            WHEN tr.temperature > 30 OR tr.temperature < -25 THEN 'CRITICO'
+            WHEN tr.value > 30 OR tr.value < -25 THEN 'CRITICO'
             ELSE 'ADVERTENCIA'
           END as severity,
-          EXTRACT(EPOCH FROM (NOW() - tr.reading_date))/60 as minutes_ago
+          EXTRACT(EPOCH FROM (NOW() - tr.timestamp))/60 as minutes_ago
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
         LEFT JOIN equipment_locations el ON e.location_id = el.location_id
         WHERE e.company_id = $1
-        AND (tr.temperature > 25 OR tr.temperature < -18)
-        AND tr.reading_date >= NOW() - INTERVAL '24 hours'
-        ORDER BY e.equipment_id, tr.reading_date DESC
+        AND (tr.value > 25 OR tr.value < -18)
+        AND tr.timestamp >= NOW() - INTERVAL '24 hours'
+        ORDER BY e.equipment_id, tr.timestamp DESC
       `;
 
       const result = await pool.query(alertsQuery, [clientCompanyId]);
@@ -119,14 +127,14 @@ class ClientTemperaturesController {
         return acc;
       }, { critical: 0, warning: 0 });
 
-      return ResponseHandler.success(res, 'Alertas de temperatura obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         alerts: result.rows,
         summary: {
           totalAlerts: result.rows.length,
           criticalAlerts: alertStats.critical,
           warningAlerts: alertStats.warning
         }
-      });
+      }, 'Alertas de temperatura obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getTemperatureAlerts:', error);
@@ -138,6 +146,11 @@ class ClientTemperaturesController {
   async getTemperatureHistory(req, res) {
     try {
       const clientCompanyId = req.user.company_id;
+
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const { 
         equipment_id = '',
         days = 7,
@@ -160,15 +173,15 @@ class ClientTemperaturesController {
       }
 
       paramCount++;
-      whereConditions.push(`tr.reading_date >= NOW() - INTERVAL '${parseInt(days)} days'`);
+      whereConditions.push(`tr.timestamp >= NOW() - INTERVAL '${parseInt(days)} days'`);
 
       // Filtro por estado
       if (status === 'CRITICAL') {
-        whereConditions.push('(tr.temperature > 25 OR tr.temperature < -18)');
+        whereConditions.push('(tr.value > 25 OR tr.value < -18)');
       } else if (status === 'WARNING') {
-        whereConditions.push('(tr.temperature > 20 AND tr.temperature <= 25) OR (tr.temperature >= -18 AND tr.temperature < -15)');
+        whereConditions.push('(tr.value > 20 AND tr.value <= 25) OR (tr.value >= -18 AND tr.value < -15)');
       } else if (status === 'NORMAL') {
-        whereConditions.push('(tr.temperature <= 20 AND tr.temperature >= -15)');
+        whereConditions.push('(tr.value <= 20 AND tr.value >= -15)');
       }
 
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
@@ -176,21 +189,21 @@ class ClientTemperaturesController {
       const historyQuery = `
         SELECT 
           e.equipment_id,
-          e.equipment_name,
+          e.name as equipment_name,
           e.equipment_type,
-          tr.temperature,
-          tr.reading_date,
+          tr.value as temperature,
+          tr.timestamp as reading_date,
           el.location_name,
           CASE 
-            WHEN tr.temperature > 25 OR tr.temperature < -18 THEN 'CRITICAL'
-            WHEN tr.temperature > 20 OR tr.temperature < -15 THEN 'WARNING'
+            WHEN tr.value > 25 OR tr.value < -18 THEN 'CRITICAL'
+            WHEN tr.value > 20 OR tr.value < -15 THEN 'WARNING'
             ELSE 'NORMAL'
           END as status
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
         LEFT JOIN equipment_locations el ON e.location_id = el.location_id
         ${whereClause}
-        ORDER BY tr.reading_date DESC
+        ORDER BY tr.timestamp DESC
         LIMIT $${paramCount} OFFSET $${paramCount + 1}
       `;
 
@@ -217,12 +230,12 @@ class ClientTemperaturesController {
       // Estadísticas del período
       const statsQuery = `
         SELECT 
-          AVG(tr.temperature) as avg_temperature,
-          MIN(tr.temperature) as min_temperature,
-          MAX(tr.temperature) as max_temperature,
+          AVG(tr.value) as avg_temperature,
+          MIN(tr.value) as min_temperature,
+          MAX(tr.value) as max_temperature,
           COUNT(*) as total_readings,
-          COUNT(CASE WHEN tr.temperature > 25 OR tr.temperature < -18 THEN 1 END) as critical_readings,
-          COUNT(CASE WHEN tr.temperature > 20 OR tr.temperature < -15 THEN 1 END) as warning_readings,
+          COUNT(CASE WHEN tr.value > 25 OR tr.value < -18 THEN 1 END) as critical_readings,
+          COUNT(CASE WHEN tr.value > 20 OR tr.value < -15 THEN 1 END) as warning_readings,
           COUNT(DISTINCT e.equipment_id) as total_equipments
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
@@ -232,7 +245,7 @@ class ClientTemperaturesController {
       const statsResult = await pool.query(statsQuery, queryParams.slice(0, -2));
       const stats = statsResult.rows[0];
 
-      return ResponseHandler.success(res, 'Historial de temperaturas obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         temperatureHistory,
         pagination: {
           currentPage: parseInt(page),
@@ -256,7 +269,7 @@ class ClientTemperaturesController {
           days: parseInt(days),
           status
         }
-      });
+      }, 'Historial de temperaturas obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getTemperatureHistory:', error);
@@ -268,6 +281,11 @@ class ClientTemperaturesController {
   async getTemperatureChartData(req, res) {
     try {
       const clientCompanyId = req.user.company_id;
+
+      if (!clientCompanyId) {
+        return ResponseHandler.error(res, 'Company ID no encontrado en token', 'MISSING_COMPANY_ID', 401);
+      }
+
       const { 
         equipment_id = '',
         days = 7,
@@ -285,29 +303,29 @@ class ClientTemperaturesController {
       }
 
       paramCount++;
-      whereConditions.push(`tr.reading_date >= NOW() - INTERVAL '${parseInt(days)} days'`);
+      whereConditions.push(`tr.timestamp >= NOW() - INTERVAL '${parseInt(days)} days'`);
 
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
       // Determinar el intervalo de agrupación
       const dateFormat = interval === 'day' 
-        ? "DATE_TRUNC('day', tr.reading_date)" 
-        : "DATE_TRUNC('hour', tr.reading_date)";
+        ? "DATE_TRUNC('day', tr.timestamp)" 
+        : "DATE_TRUNC('hour', tr.timestamp)";
 
       const chartQuery = `
         SELECT 
           ${dateFormat} as period,
           e.equipment_id,
-          e.equipment_name,
-          AVG(tr.temperature) as avg_temperature,
-          MIN(tr.temperature) as min_temperature,
-          MAX(tr.temperature) as max_temperature,
-          COUNT(tr.reading_id) as reading_count
+          e.name as equipment_name,
+          AVG(tr.value) as avg_temperature,
+          MIN(tr.value) as min_temperature,
+          MAX(tr.value) as max_temperature,
+          COUNT(tr.temperature_reading_id) as reading_count
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
         ${whereClause}
-        GROUP BY ${dateFormat}, e.equipment_id, e.equipment_name
-        ORDER BY period ASC, e.equipment_name ASC
+        GROUP BY ${dateFormat}, e.equipment_id, e.name
+        ORDER BY period ASC, e.name ASC
       `;
 
       const result = await pool.query(chartQuery, queryParams);
@@ -332,12 +350,12 @@ class ClientTemperaturesController {
         });
       });
 
-      return ResponseHandler.success(res, 'Datos de gráfico de temperaturas obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         chartData: Object.values(equipmentData),
         period: parseInt(days),
         interval,
         totalEquipments: Object.keys(equipmentData).length
-      });
+      }, 'Datos de gráfico de temperaturas obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getTemperatureChartData:', error);
