@@ -15,14 +15,15 @@ router.use((req, res, next) => {
 // Importar y organizar todas las rutas
 const authRoutes = require('./auth/auth.routes');
 const adminRoutes = require('./admin/admin.routes');
-// const equipmentRoutes = require('./equipments/equipment.routes');
-// const serviceRoutes = require('./services/service.routes');
+const clientRoutes = require('./client');
+const providerRoutes = require('./provider');
+const { authenticateToken, requireCliente, requireProveedor } = require('../helpers/auth');
 
 // Montar las rutas con sus prefijos
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
-// router.use('/equipments', equipmentRoutes);
-// router.use('/services', serviceRoutes);
+router.use('/client', authenticateToken, requireCliente, clientRoutes);
+router.use('/provider', authenticateToken, requireProveedor, providerRoutes);
 
 // Ruta de estado general de la API
 router.get('/health', (req, res) => {
@@ -31,8 +32,8 @@ router.get('/health', (req, res) => {
     availableModules: [
       '/auth/* - Autenticación y registro de usuarios',
       '/admin/* - Funciones administrativas (requiere contraseña)',
-      // '/equipments/* - Gestión de equipos de refrigeración',
-      // '/services/* - Gestión de servicios técnicos'
+      '/client/* - Funcionalidades para clientes (requiere rol CLIENTE)',
+      '/provider/* - Funcionalidades para proveedores (requiere rol PROVEEDOR)'
     ],
     endpoints: {
       auth: {
@@ -44,6 +45,20 @@ router.get('/health', (req, res) => {
       admin: {
         users: 'POST /api/admin/users (requiere admin_password)',
         database: 'POST /api/admin/db-status (requiere admin_password)'
+      },
+      client: {
+        dashboard: 'GET /api/client/dashboard',
+        equipments: 'GET /api/client/equipments',
+        serviceRequests: 'GET /api/client/service-requests',
+        profile: 'GET /api/client/profile'
+      },
+      provider: {
+        dashboard: 'GET /api/provider/dashboard',
+        clients: 'GET /api/provider/clients',
+        equipments: 'GET /api/provider/equipments (CRUD)',
+        serviceRequests: 'GET /api/provider/service-requests (CRUD)',
+        maintenances: 'GET /api/provider/maintenances (CRUD)',
+        rentals: 'GET /api/provider/rentals (CRUD)'
       }
     }
   };
@@ -80,6 +95,30 @@ router.get('/docs', (req, res) => {
           'POST /admin/db-status': 'Estado de la base de datos'
         },
         note: 'Requiere admin_password en el body'
+      },
+      client: {
+        description: 'Funcionalidades para usuarios con rol CLIENTE (solo lectura + solicitudes)',
+        routes: {
+          'GET /client/dashboard': 'Dashboard con métricas del cliente',
+          'GET /client/equipments': 'Lista de equipos asignados al cliente',
+          'GET /client/temperatures/current': 'Temperaturas actuales',
+          'GET /client/energy/current': 'Consumo energético actual',
+          'POST /client/service-requests': 'Crear solicitud de servicio',
+          'GET /client/service-requests': 'Ver solicitudes del cliente',
+          'GET /client/maintenances': 'Ver mantenimientos programados'
+        }
+      },
+      provider: {
+        description: 'Funcionalidades para usuarios con rol PROVEEDOR (gestión completa)',
+        routes: {
+          'GET /provider/dashboard': 'Dashboard empresarial del proveedor',
+          'GET /provider/clients': 'Gestión de clientes asignados',
+          'CRUD /provider/equipments': 'Gestión completa de equipos',
+          'CRUD /provider/service-requests': 'Gestión de solicitudes de servicio',
+          'CRUD /provider/maintenances': 'Programación y gestión de mantenimientos',
+          'CRUD /provider/rentals': 'Sistema de rentas de equipos',
+          'GET /provider/profile': 'Perfil unificado (usuario + empresa)'
+        }
       }
     }
   };
