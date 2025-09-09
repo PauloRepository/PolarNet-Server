@@ -16,22 +16,22 @@ class ClientTemperaturesController {
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
           e.name as equipment_name,
-          e.equipment_type,
+          e.type as equipment_type,
           tr.value as temperature,
           tr.timestamp as reading_date,
-          el.location_name,
+          el.address as location_name,
           el.address as location_address,
           CASE 
-            WHEN tr.value > 25 OR tr.value < -18 THEN 'CRITICAL'
-            WHEN tr.value > 20 OR tr.value < -15 THEN 'WARNING'
+            WHEN tr.value > 20 OR tr.value < -15 THEN 'CRITICAL'
+            WHEN tr.value > 15 OR tr.value < -10 THEN 'WARNING'
             ELSE 'NORMAL'
           END as status,
           EXTRACT(EPOCH FROM (NOW() - tr.timestamp))/60 as minutes_ago
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        AND tr.timestamp >= NOW() - INTERVAL '2 hours'
+        AND tr.timestamp >= NOW() - INTERVAL '7 days'
         ORDER BY e.equipment_id, tr.timestamp DESC
       `;
 
@@ -41,8 +41,8 @@ class ClientTemperaturesController {
       const statsQuery = `
         SELECT 
           COUNT(*) as total_equipments,
-          COUNT(CASE WHEN tr.value > 25 OR tr.value < -18 THEN 1 END) as critical_equipments,
-          COUNT(CASE WHEN tr.value > 20 OR tr.value < -15 THEN 1 END) as warning_equipments,
+          COUNT(CASE WHEN tr.value > 20 OR tr.value < -15 THEN 1 END) as critical_equipments,
+          COUNT(CASE WHEN tr.value > 15 OR tr.value < -10 THEN 1 END) as warning_equipments,
           AVG(tr.value) as avg_temperature,
           MIN(tr.value) as min_temperature,
           MAX(tr.value) as max_temperature
@@ -50,7 +50,7 @@ class ClientTemperaturesController {
         INNER JOIN (
           SELECT DISTINCT ON (equipment_id) equipment_id, value, timestamp
           FROM temperature_readings 
-          WHERE timestamp >= NOW() - INTERVAL '2 hours'
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
           ORDER BY equipment_id, timestamp DESC
         ) tr ON e.equipment_id = tr.equipment_id
         WHERE e.company_id = $1
@@ -91,27 +91,27 @@ class ClientTemperaturesController {
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
           e.name as equipment_name,
-          e.equipment_type,
+          e.type as equipment_type,
           tr.value as temperature,
           tr.timestamp as reading_date,
-          el.location_name,
+          el.address as location_name,
           el.address as location_address,
           CASE 
-            WHEN tr.value > 25 THEN 'TEMPERATURA_ALTA'
-            WHEN tr.value < -18 THEN 'TEMPERATURA_BAJA'
+            WHEN tr.value > 20 THEN 'TEMPERATURA_ALTA'
+            WHEN tr.value < -15 THEN 'TEMPERATURA_BAJA'
             ELSE 'NORMAL'
           END as alert_type,
           CASE 
-            WHEN tr.value > 30 OR tr.value < -25 THEN 'CRITICO'
+            WHEN tr.value > 25 OR tr.value < -20 THEN 'CRITICO'
             ELSE 'ADVERTENCIA'
           END as severity,
           EXTRACT(EPOCH FROM (NOW() - tr.timestamp))/60 as minutes_ago
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        AND (tr.value > 25 OR tr.value < -18)
-        AND tr.timestamp >= NOW() - INTERVAL '24 hours'
+        AND (tr.value > 20 OR tr.value < -15)
+        AND tr.timestamp >= NOW() - INTERVAL '7 days'
         ORDER BY e.equipment_id, tr.timestamp DESC
       `;
 
@@ -190,10 +190,10 @@ class ClientTemperaturesController {
         SELECT 
           e.equipment_id,
           e.name as equipment_name,
-          e.equipment_type,
+          e.type as equipment_type,
           tr.value as temperature,
           tr.timestamp as reading_date,
-          el.location_name,
+          el.address as location_name,
           CASE 
             WHEN tr.value > 25 OR tr.value < -18 THEN 'CRITICAL'
             WHEN tr.value > 20 OR tr.value < -15 THEN 'WARNING'
@@ -201,7 +201,7 @@ class ClientTemperaturesController {
           END as status
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         ${whereClause}
         ORDER BY tr.timestamp DESC
         LIMIT $${paramCount} OFFSET $${paramCount + 1}
@@ -214,7 +214,7 @@ class ClientTemperaturesController {
         SELECT COUNT(*) as total
         FROM equipments e
         INNER JOIN temperature_readings tr ON e.equipment_id = tr.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         ${whereClause}
       `;
 

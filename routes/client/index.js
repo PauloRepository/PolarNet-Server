@@ -27,7 +27,6 @@ router.get('/equipments', equipmentsController.getEquipments);
 router.get('/equipments/available', equipmentsController.getAvailableEquipments);
 router.post('/equipments/request', equipmentsController.requestEquipment);
 router.get('/equipments/:id', equipmentsController.getEquipmentDetails);
-router.post('/equipments/:id/service-request', equipmentsController.requestEquipmentService);
 
 // =================================
 // RUTAS DE TEMPERATURAS (Solo lectura)

@@ -11,25 +11,25 @@ class ClientEnergyController {
       const consumptionQuery = `
         SELECT DISTINCT ON (e.equipment_id)
           e.equipment_id,
-          e.equipment_name,
-          e.equipment_type,
-          er.power_consumption,
-          er.energy_consumed,
-          er.reading_date,
-          el.location_name,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          er.consumption as power_consumption,
+          er.consumption as energy_consumed,
+          er.timestamp as reading_date,
+          el.address as location_name,
           el.address as location_address,
           CASE 
-            WHEN er.power_consumption > 1000 THEN 'ALTO'
-            WHEN er.power_consumption > 500 THEN 'MEDIO'
+            WHEN er.consumption > 1000 THEN 'ALTO'
+            WHEN er.consumption > 500 THEN 'MEDIO'
             ELSE 'BAJO'
           END as consumption_level,
-          EXTRACT(EPOCH FROM (NOW() - er.reading_date))/60 as minutes_ago
+          EXTRACT(EPOCH FROM (NOW() - er.timestamp))/60 as minutes_ago
         FROM equipments e
         INNER JOIN energy_readings er ON e.equipment_id = er.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
         WHERE e.company_id = $1
-        AND er.reading_date >= NOW() - INTERVAL '2 hours'
-        ORDER BY e.equipment_id, er.reading_date DESC
+        AND er.timestamp >= NOW() - INTERVAL '7 days'
+        ORDER BY e.equipment_id, er.timestamp DESC
       `;
 
       const result = await pool.query(consumptionQuery, [clientCompanyId]);
@@ -38,22 +38,21 @@ class ClientEnergyController {
       const statsQuery = `
         SELECT 
           COUNT(*) as total_equipments,
-          SUM(er.power_consumption) as total_power_consumption,
-          AVG(er.power_consumption) as avg_power_consumption,
-          MAX(er.power_consumption) as max_power_consumption,
-          SUM(er.energy_consumed) as total_energy_consumed,
-          COUNT(CASE WHEN er.power_consumption > 1000 THEN 1 END) as high_consumption_equipments,
-          COUNT(CASE WHEN er.power_consumption > 500 AND er.power_consumption <= 1000 THEN 1 END) as medium_consumption_equipments
+          SUM(er.consumption) as total_power_consumption,
+          AVG(er.consumption) as avg_power_consumption,
+          MAX(er.consumption) as max_power_consumption,
+          SUM(er.consumption) as total_energy_consumed,
+          COUNT(CASE WHEN er.consumption > 1000 THEN 1 END) as high_consumption_equipments,
+          COUNT(CASE WHEN er.consumption > 500 AND er.consumption <= 1000 THEN 1 END) as medium_consumption_equipments
         FROM equipments e
         INNER JOIN (
           SELECT DISTINCT ON (equipment_id) 
             equipment_id, 
-            power_consumption, 
-            energy_consumed,
-            reading_date
+            consumption,
+            timestamp
           FROM energy_readings 
-          WHERE reading_date >= NOW() - INTERVAL '2 hours'
-          ORDER BY equipment_id, reading_date DESC
+          WHERE timestamp >= NOW() - INTERVAL '7 days'
+          ORDER BY equipment_id, timestamp DESC
         ) er ON e.equipment_id = er.equipment_id
         WHERE e.company_id = $1
       `;
@@ -61,7 +60,7 @@ class ClientEnergyController {
       const statsResult = await pool.query(statsQuery, [clientCompanyId]);
       const stats = statsResult.rows[0];
 
-      return ResponseHandler.success(res, 'Consumo energético actual obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         consumption: result.rows,
         summary: {
           totalEquipments: parseInt(stats.total_equipments) || 0,
@@ -73,7 +72,7 @@ class ClientEnergyController {
           mediumConsumptionEquipments: parseInt(stats.medium_consumption_equipments) || 0,
           lowConsumptionEquipments: (parseInt(stats.total_equipments) || 0) - (parseInt(stats.high_consumption_equipments) || 0) - (parseInt(stats.medium_consumption_equipments) || 0)
         }
-      });
+      }, 'Consumo energético actual obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getCurrentConsumption:', error);
@@ -101,25 +100,25 @@ class ClientEnergyController {
       }
 
       paramCount++;
-      whereConditions.push(`er.reading_date >= NOW() - INTERVAL '${parseInt(days)} days'`);
+      whereConditions.push(`er.timestamp >= NOW() - INTERVAL '${parseInt(days)} days'`);
 
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
       const dailyQuery = `
         SELECT 
-          DATE(er.reading_date) as consumption_date,
+          DATE(er.timestamp) as consumption_date,
           e.equipment_id,
-          e.equipment_name,
-          e.equipment_type,
-          SUM(er.energy_consumed) as daily_energy_consumed,
-          AVG(er.power_consumption) as avg_power_consumption,
-          MAX(er.power_consumption) as max_power_consumption,
-          COUNT(er.reading_id) as reading_count
+          e.name as equipment_name,
+          e.type as equipment_type,
+          SUM(er.consumption) as daily_energy_consumed,
+          AVG(er.consumption) as avg_power_consumption,
+          MAX(er.consumption) as max_power_consumption,
+          COUNT(er.energy_reading_id) as reading_count
         FROM equipments e
         INNER JOIN energy_readings er ON e.equipment_id = er.equipment_id
         ${whereClause}
-        GROUP BY DATE(er.reading_date), e.equipment_id, e.equipment_name, e.equipment_type
-        ORDER BY consumption_date DESC, e.equipment_name ASC
+        GROUP BY DATE(er.timestamp), e.equipment_id, e.name, e.type
+        ORDER BY consumption_date DESC, e.name ASC
       `;
 
       const result = await pool.query(dailyQuery, queryParams);
@@ -171,7 +170,7 @@ class ClientEnergyController {
       const totalEnergyPeriod = dailyData.reduce((sum, day) => sum + day.totalEnergyConsumed, 0);
       const avgDailyConsumption = dailyData.length > 0 ? totalEnergyPeriod / dailyData.length : 0;
 
-      return ResponseHandler.success(res, 'Consumo diario obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         dailyConsumption: dailyData,
         summary: {
           totalDays: dailyData.length,
@@ -184,7 +183,7 @@ class ClientEnergyController {
           days: parseInt(days),
           equipment_id
         }
-      });
+      }, 'Consumo diario obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getDailyConsumption:', error);
@@ -212,25 +211,25 @@ class ClientEnergyController {
       }
 
       paramCount++;
-      whereConditions.push(`er.reading_date >= NOW() - INTERVAL '${parseInt(months)} months'`);
+      whereConditions.push(`er.timestamp >= NOW() - INTERVAL '${parseInt(months)} months'`);
 
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
       const monthlyQuery = `
         SELECT 
-          DATE_TRUNC('month', er.reading_date) as consumption_month,
+          DATE_TRUNC('month', er.timestamp) as consumption_month,
           e.equipment_id,
-          e.equipment_name,
-          e.equipment_type,
-          SUM(er.energy_consumed) as monthly_energy_consumed,
-          AVG(er.power_consumption) as avg_power_consumption,
-          MAX(er.power_consumption) as max_power_consumption,
-          COUNT(er.reading_id) as reading_count
+          e.name as equipment_name,
+          e.type as equipment_type,
+          SUM(er.consumption) as monthly_energy_consumed,
+          AVG(er.consumption) as avg_power_consumption,
+          MAX(er.consumption) as max_power_consumption,
+          COUNT(er.energy_reading_id) as reading_count
         FROM equipments e
         INNER JOIN energy_readings er ON e.equipment_id = er.equipment_id
         ${whereClause}
-        GROUP BY DATE_TRUNC('month', er.reading_date), e.equipment_id, e.equipment_name, e.equipment_type
-        ORDER BY consumption_month DESC, e.equipment_name ASC
+        GROUP BY DATE_TRUNC('month', er.timestamp), e.equipment_id, e.name, e.type
+        ORDER BY consumption_month DESC, e.name ASC
       `;
 
       const result = await pool.query(monthlyQuery, queryParams);
@@ -294,7 +293,7 @@ class ClientEnergyController {
         else if (changePercent < -10) trend = 'DECREASING';
       }
 
-      return ResponseHandler.success(res, 'Consumo mensual obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         monthlyConsumption: monthlyData,
         summary: {
           totalMonths: monthlyData.length,
@@ -308,7 +307,7 @@ class ClientEnergyController {
           months: parseInt(months),
           equipment_id
         }
-      });
+      }, 'Consumo mensual obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getMonthlyConsumption:', error);
@@ -326,30 +325,30 @@ class ClientEnergyController {
       const efficiencyQuery = `
         SELECT 
           e.equipment_id,
-          e.equipment_name,
-          e.equipment_type,
-          AVG(er.power_consumption) as avg_power_consumption,
-          SUM(er.energy_consumed) as total_energy_consumed,
-          COUNT(er.reading_id) as total_readings,
-          MIN(er.reading_date) as first_reading,
-          MAX(er.reading_date) as last_reading,
-          EXTRACT(EPOCH FROM (MAX(er.reading_date) - MIN(er.reading_date)))/3600 as hours_monitored,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          AVG(er.consumption) as avg_power_consumption,
+          SUM(er.consumption) as total_energy_consumed,
+          COUNT(er.energy_reading_id) as total_readings,
+          MIN(er.timestamp) as first_reading,
+          MAX(er.timestamp) as last_reading,
+          EXTRACT(EPOCH FROM (MAX(er.timestamp) - MIN(er.timestamp)))/3600 as hours_monitored,
           -- Eficiencia basada en consumo vs tiempo de operación
           CASE 
-            WHEN AVG(er.power_consumption) <= 300 THEN 'EXCELENTE'
-            WHEN AVG(er.power_consumption) <= 600 THEN 'BUENA'
-            WHEN AVG(er.power_consumption) <= 1000 THEN 'REGULAR'
+            WHEN AVG(er.consumption) <= 300 THEN 'EXCELENTE'
+            WHEN AVG(er.consumption) <= 600 THEN 'BUENA'
+            WHEN AVG(er.consumption) <= 1000 THEN 'REGULAR'
             ELSE 'DEFICIENTE'
           END as efficiency_rating,
           -- Calcular variabilidad del consumo
-          STDDEV(er.power_consumption) as consumption_variability
+          STDDEV(er.consumption) as consumption_variability
         FROM equipments e
         INNER JOIN energy_readings er ON e.equipment_id = er.equipment_id
         WHERE e.company_id = $1
-        AND er.reading_date >= NOW() - INTERVAL '${parseInt(days)} days'
-        GROUP BY e.equipment_id, e.equipment_name, e.equipment_type
-        HAVING COUNT(er.reading_id) > 0
-        ORDER BY AVG(er.power_consumption) ASC
+        AND er.timestamp >= NOW() - INTERVAL '${parseInt(days)} days'
+        GROUP BY e.equipment_id, e.name, e.type
+        HAVING COUNT(er.energy_reading_id) > 0
+        ORDER BY AVG(er.consumption) ASC
       `;
 
       const result = await pool.query(efficiencyQuery, [clientCompanyId]);
@@ -415,7 +414,7 @@ class ClientEnergyController {
         });
       }
 
-      return ResponseHandler.success(res, 'Análisis de eficiencia energética obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         equipmentEfficiency,
         summary: {
           totalEquipments,
@@ -430,7 +429,7 @@ class ClientEnergyController {
         },
         recommendations,
         analysisпериод: parseInt(days)
-      });
+      }, 'Análisis de eficiencia energética obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getEnergyEfficiency:', error);
@@ -460,30 +459,30 @@ class ClientEnergyController {
       }
 
       paramCount++;
-      whereConditions.push(`er.reading_date >= NOW() - INTERVAL '${parseInt(days)} days'`);
+      whereConditions.push(`er.timestamp >= NOW() - INTERVAL '${parseInt(days)} days'`);
 
       const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
       // Determinar el intervalo de agrupación
       const dateFormat = interval === 'day' 
-        ? "DATE_TRUNC('day', er.reading_date)" 
-        : "DATE_TRUNC('hour', er.reading_date)";
+        ? "DATE_TRUNC('day', er.timestamp)" 
+        : "DATE_TRUNC('hour', er.timestamp)";
 
       const chartQuery = `
         SELECT 
           ${dateFormat} as period,
           e.equipment_id,
-          e.equipment_name,
-          AVG(er.power_consumption) as avg_power_consumption,
-          MAX(er.power_consumption) as max_power_consumption,
-          MIN(er.power_consumption) as min_power_consumption,
-          SUM(er.energy_consumed) as total_energy_consumed,
-          COUNT(er.reading_id) as reading_count
+          e.name as equipment_name,
+          AVG(er.consumption) as avg_power_consumption,
+          MAX(er.consumption) as max_power_consumption,
+          MIN(er.consumption) as min_power_consumption,
+          SUM(er.consumption) as total_energy_consumed,
+          COUNT(er.energy_reading_id) as reading_count
         FROM equipments e
         INNER JOIN energy_readings er ON e.equipment_id = er.equipment_id
         ${whereClause}
-        GROUP BY ${dateFormat}, e.equipment_id, e.equipment_name
-        ORDER BY period ASC, e.equipment_name ASC
+        GROUP BY ${dateFormat}, e.equipment_id, e.name
+        ORDER BY period ASC, e.name ASC
       `;
 
       const result = await pool.query(chartQuery, queryParams);
@@ -517,13 +516,13 @@ class ClientEnergyController {
         equipmentData[row.equipment_id].data.push(dataPoint);
       });
 
-      return ResponseHandler.success(res, 'Datos de gráfico de consumo energético obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         chartData: Object.values(equipmentData),
         period: parseInt(days),
         interval,
         metric,
         totalEquipments: Object.keys(equipmentData).length
-      });
+      }, 'Datos de gráfico de consumo energético obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getEnergyChartData:', error);
