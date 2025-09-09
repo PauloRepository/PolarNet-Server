@@ -24,8 +24,9 @@ router.get('/dashboard/maintenances', dashboardController.getUpcomingMaintenance
 // RUTAS DE EQUIPOS (Solo lectura + solicitar servicio)
 // =================================
 router.get('/equipments', equipmentsController.getEquipments);
+router.get('/equipments/available', equipmentsController.getAvailableEquipments);
+router.post('/equipments/request', equipmentsController.requestEquipment);
 router.get('/equipments/:id', equipmentsController.getEquipmentDetails);
-router.get('/equipments/:id/temperature-history', equipmentsController.getEquipmentTemperatureHistory);
 router.post('/equipments/:id/service-request', equipmentsController.requestEquipmentService);
 
 // =================================
