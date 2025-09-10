@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { maintenancesRateLimit } = require('../../middlewares/security.middleware');
 
 // Importar controladores del módulo cliente
 const dashboardController = require('../../controllers/client/dashboard.controller');
@@ -59,9 +60,6 @@ router.delete('/service-requests/:id', serviceRequestsController.cancelServiceRe
 // RUTAS DE MANTENIMIENTOS (Solo lectura)
 // =================================
 router.get('/maintenances', maintenancesController.getMaintenances);
-router.get('/maintenances/upcoming', maintenancesController.getUpcomingMaintenances);
-router.get('/maintenances/calendar', maintenancesController.getMaintenanceCalendar);
-router.get('/maintenances/statistics', maintenancesController.getMaintenanceStatistics);
 router.get('/maintenances/:id', maintenancesController.getMaintenanceDetails);
 router.get('/maintenances/history/:equipmentId', maintenancesController.getEquipmentMaintenanceHistory);
 

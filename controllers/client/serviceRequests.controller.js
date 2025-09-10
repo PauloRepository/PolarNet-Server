@@ -20,7 +20,7 @@ class ClientServiceRequestsController {
       const offset = (page - 1) * limit;
 
       // Construir filtros dinámicamente
-      let whereConditions = ['sr.company_id = $1'];
+      let whereConditions = ['e.company_id = $1'];
       let queryParams = [clientCompanyId];
       let paramCount = 1;
 
@@ -58,39 +58,31 @@ class ClientServiceRequestsController {
 
       const serviceRequestsQuery = `
         SELECT 
-          sr.request_id,
+          sr.service_request_id as request_id,
           sr.equipment_id,
-          sr.request_type,
+          sr.issue_type as request_type,
           sr.priority,
           sr.status,
           sr.description,
           sr.request_date,
           sr.scheduled_date,
           sr.completion_date,
-          sr.estimated_cost,
-          sr.actual_cost,
-          sr.notes,
-          sr.created_at,
-          sr.updated_at,
-          e.equipment_name,
-          e.equipment_type,
-          el.location_name,
+          sr.description as notes,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          el.address as location_name,
           el.address as location_address,
-          u.full_name as requested_by_name,
-          prov.company_name as provider_name,
-          prov_user.full_name as assigned_technician
+          u.name as requested_by_name
         FROM service_requests sr
         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
-        LEFT JOIN users u ON sr.requested_by = u.user_id
-        LEFT JOIN companies prov ON sr.provider_id = prov.company_id
-        LEFT JOIN users prov_user ON sr.assigned_technician = prov_user.user_id
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
+        LEFT JOIN users u ON sr.user_id = u.user_id
         ${whereClause}
         ORDER BY 
           CASE sr.priority 
-            WHEN 'ALTA' THEN 1 
-            WHEN 'MEDIA' THEN 2 
-            WHEN 'BAJA' THEN 3 
+            WHEN 'HIGH' THEN 1 
+            WHEN 'MEDIUM' THEN 2 
+            WHEN 'LOW' THEN 3 
           END,
           sr.request_date DESC
         LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
@@ -141,7 +133,7 @@ class ClientServiceRequestsController {
         return acc;
       }, {});
 
-      return ResponseHandler.success(res, 'Solicitudes de servicio obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         serviceRequests,
         pagination: {
           currentPage: parseInt(page),
@@ -158,7 +150,7 @@ class ClientServiceRequestsController {
           date_from,
           date_to
         }
-      });
+      }, 'Solicitudes de servicio obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getServiceRequests:', error);
@@ -174,44 +166,29 @@ class ClientServiceRequestsController {
 
       const detailQuery = `
         SELECT 
-          sr.request_id,
+          sr.service_request_id as request_id,
           sr.equipment_id,
-          sr.request_type,
+          sr.issue_type as request_type,
           sr.priority,
           sr.status,
           sr.description,
           sr.request_date,
           sr.scheduled_date,
           sr.completion_date,
-          sr.estimated_cost,
-          sr.actual_cost,
-          sr.notes,
-          sr.created_at,
-          sr.updated_at,
-          e.equipment_name,
-          e.equipment_type,
+          e.name as equipment_name,
+          e.type as equipment_type,
           e.model,
           e.serial_number,
-          el.location_name,
+          el.address as location_name,
           el.address as location_address,
-          el.contact_person,
-          el.contact_phone,
-          u.full_name as requested_by_name,
-          u.email as requested_by_email,
-          prov.company_name as provider_name,
-          prov.contact_email as provider_email,
-          prov.contact_phone as provider_phone,
-          prov_user.full_name as assigned_technician,
-          prov_user.email as technician_email,
-          prov_user.phone as technician_phone
+          u.name as requested_by_name,
+          u.email as requested_by_email
         FROM service_requests sr
         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        LEFT JOIN equipment_locations el ON e.location_id = el.location_id
-        LEFT JOIN users u ON sr.requested_by = u.user_id
-        LEFT JOIN companies prov ON sr.provider_id = prov.company_id
-        LEFT JOIN users prov_user ON sr.assigned_technician = prov_user.user_id
-        WHERE sr.request_id = $1 
-        AND sr.company_id = $2
+        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
+        LEFT JOIN users u ON sr.user_id = u.user_id
+        WHERE sr.service_request_id = $1 
+        AND e.company_id = $2
       `;
 
       const result = await pool.query(detailQuery, [id, clientCompanyId]);
@@ -251,10 +228,10 @@ class ClientServiceRequestsController {
         });
       }
 
-      return ResponseHandler.success(res, 'Detalles de solicitud obtenidos exitosamente', {
+      return ResponseHandler.success(res, {
         serviceRequest,
         timeline: timeline.sort((a, b) => new Date(a.date) - new Date(b.date))
-      });
+      }, 'Detalles de solicitud obtenidos exitosamente');
 
     } catch (error) {
       console.error('Error en getServiceRequestDetails:', error);
@@ -270,10 +247,8 @@ class ClientServiceRequestsController {
       const {
         equipment_id,
         request_type,
-        priority = 'MEDIA',
-        description,
-        preferred_date = null,
-        location_notes = ''
+        priority = 'MEDIUM',
+        description
       } = req.body;
 
       // Validaciones
@@ -281,69 +256,55 @@ class ClientServiceRequestsController {
         return ResponseHandler.badRequest(res, 'Equipo, tipo de solicitud y descripción son obligatorios');
       }
 
-      // Verificar que el equipo pertenezca a la empresa del cliente
-      const equipmentCheck = await pool.query(
-        'SELECT equipment_id, equipment_name FROM equipments WHERE equipment_id = $1 AND company_id = $2',
-        [equipment_id, clientCompanyId]
-      );
-
-      if (equipmentCheck.rows.length === 0) {
+        // Verificar que el equipo pertenezca a la empresa del cliente
+        const equipmentCheck = await pool.query(
+          'SELECT equipment_id, name FROM equipments WHERE equipment_id = $1 AND company_id = $2',
+          [equipment_id, clientCompanyId]
+        );      if (equipmentCheck.rows.length === 0) {
         return ResponseHandler.notFound(res, 'Equipo no encontrado o no autorizado');
       }
 
-      // Obtener proveedor por defecto para este tipo de equipo (simplificado)
-      // En un sistema real, habría lógica más compleja para asignar proveedores
-      const providerQuery = `
-        SELECT company_id, company_name 
-        FROM companies 
-        WHERE company_type = 'PROVEEDOR' 
-        AND status = 'ACTIVO'
-        ORDER BY created_at ASC 
-        LIMIT 1
-      `;
-
-      const providerResult = await pool.query(providerQuery);
+        // Obtener proveedor por defecto para este tipo de equipo (simplificado)
+        // En un sistema real, habría lógica más compleja para asignar proveedores
+        const providerQuery = `
+          SELECT company_id, name 
+          FROM companies 
+          WHERE business_type = 'PROVEEDOR' 
+          ORDER BY company_id ASC 
+          LIMIT 1
+        `;      const providerResult = await pool.query(providerQuery);
       const providerId = providerResult.rows.length > 0 ? providerResult.rows[0].company_id : null;
 
-      const createQuery = `
-        INSERT INTO service_requests (
+        const createQuery = `
+          INSERT INTO service_requests (
+            equipment_id,
+            user_id,
+            description,
+            priority,
+            issue_type,
+            status,
+            request_date
+          )
+          VALUES ($1, $2, $3, $4, $5, 'OPEN', NOW())
+          RETURNING service_request_id, request_date, status
+        `;
+
+        const result = await pool.query(createQuery, [
           equipment_id,
-          company_id,
-          requested_by,
-          provider_id,
-          request_type,
-          priority,
+          userId,
           description,
-          status,
-          request_date,
-          preferred_date,
-          location_notes,
-          created_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDIENTE', NOW(), $8, $9, NOW())
-        RETURNING request_id, request_date, status
-      `;
+          priority,
+          request_type
+        ]);
 
-      const result = await pool.query(createQuery, [
-        equipment_id,
-        clientCompanyId,
-        userId,
-        providerId,
-        request_type,
-        priority,
-        description,
-        preferred_date,
-        location_notes
-      ]);
+        const newRequest = result.rows[0];
 
-      const newRequest = result.rows[0];
-
-      return ResponseHandler.success(res, 'Solicitud de servicio creada exitosamente', {
-        request_id: newRequest.request_id,
-        status: newRequest.status,
-        request_date: newRequest.request_date,
-        equipment_name: equipmentCheck.rows[0].equipment_name
-      }, 201);
+        return ResponseHandler.success(res, {
+          request_id: newRequest.service_request_id,
+          status: newRequest.status,
+          request_date: newRequest.request_date,
+          equipment_name: equipmentCheck.rows[0].name
+        }, 'Solicitud de servicio creada exitosamente', 201);
 
     } catch (error) {
       console.error('Error en createServiceRequest:', error);
@@ -357,15 +318,17 @@ class ClientServiceRequestsController {
       const clientCompanyId = req.user.company_id;
       const { id } = req.params;
       const {
-        description,
-        preferred_date,
-        location_notes,
-        priority
+        request_type,
+        priority = 'MEDIUM',
+        description
       } = req.body;
 
       // Verificar que la solicitud existe y pertenece al cliente
       const existingRequest = await pool.query(
-        'SELECT request_id, status FROM service_requests WHERE request_id = $1 AND company_id = $2',
+        `SELECT sr.service_request_id, sr.status 
+         FROM service_requests sr
+         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+         WHERE sr.service_request_id = $1 AND e.company_id = $2`,
         [id, clientCompanyId]
       );
 
@@ -375,7 +338,7 @@ class ClientServiceRequestsController {
 
       // Solo permitir actualizar si está en estado PENDIENTE o PROGRAMADO
       const currentStatus = existingRequest.rows[0].status;
-      if (!['PENDIENTE', 'PROGRAMADO'].includes(currentStatus)) {
+      if (!['OPEN', 'ASSIGNED'].includes(currentStatus)) {
         return ResponseHandler.badRequest(res, 'No se puede actualizar una solicitud en estado: ' + currentStatus);
       }
 
@@ -390,19 +353,13 @@ class ClientServiceRequestsController {
         queryParams.push(description);
       }
 
-      if (preferred_date !== undefined) {
+      if (request_type !== undefined) {
         paramCount++;
-        updateFields.push(`preferred_date = $${paramCount}`);
-        queryParams.push(preferred_date);
+        updateFields.push(`issue_type = $${paramCount}`);
+        queryParams.push(request_type);
       }
 
-      if (location_notes !== undefined) {
-        paramCount++;
-        updateFields.push(`location_notes = $${paramCount}`);
-        queryParams.push(location_notes);
-      }
-
-      if (priority !== undefined && ['BAJA', 'MEDIA', 'ALTA'].includes(priority)) {
+      if (priority !== undefined && ['LOW', 'MEDIUM', 'HIGH'].includes(priority)) {
         paramCount++;
         updateFields.push(`priority = $${paramCount}`);
         queryParams.push(priority);
@@ -412,26 +369,21 @@ class ClientServiceRequestsController {
         return ResponseHandler.badRequest(res, 'No hay campos válidos para actualizar');
       }
 
-      paramCount++;
-      updateFields.push(`updated_at = NOW()`);
       queryParams.push(id);
-      paramCount++;
-      queryParams.push(clientCompanyId);
 
       const updateQuery = `
         UPDATE service_requests 
         SET ${updateFields.join(', ')}
-        WHERE request_id = $${paramCount - 1} AND company_id = $${paramCount}
-        RETURNING request_id, status, updated_at
+        WHERE service_request_id = $${paramCount + 1}
+        RETURNING service_request_id, status
       `;
 
       const result = await pool.query(updateQuery, queryParams);
 
-      return ResponseHandler.success(res, 'Solicitud de servicio actualizada exitosamente', {
-        request_id: result.rows[0].request_id,
-        status: result.rows[0].status,
-        updated_at: result.rows[0].updated_at
-      });
+      return ResponseHandler.success(res, {
+        request_id: result.rows[0].service_request_id,
+        status: result.rows[0].status
+      }, 'Solicitud de servicio actualizada exitosamente');
 
     } catch (error) {
       console.error('Error en updateServiceRequest:', error);
@@ -448,7 +400,10 @@ class ClientServiceRequestsController {
 
       // Verificar que la solicitud existe y pertenece al cliente
       const existingRequest = await pool.query(
-        'SELECT request_id, status FROM service_requests WHERE request_id = $1 AND company_id = $2',
+        `SELECT sr.service_request_id, sr.status 
+         FROM service_requests sr
+         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+         WHERE sr.service_request_id = $1 AND e.company_id = $2`,
         [id, clientCompanyId]
       );
 
@@ -458,26 +413,23 @@ class ClientServiceRequestsController {
 
       // Solo permitir cancelar si está en estado PENDIENTE o PROGRAMADO
       const currentStatus = existingRequest.rows[0].status;
-      if (!['PENDIENTE', 'PROGRAMADO'].includes(currentStatus)) {
+      if (!['OPEN', 'ASSIGNED'].includes(currentStatus)) {
         return ResponseHandler.badRequest(res, 'No se puede cancelar una solicitud en estado: ' + currentStatus);
       }
 
       const cancelQuery = `
         UPDATE service_requests 
-        SET status = 'CANCELADO',
-            notes = COALESCE(notes || '\n', '') || 'Cancelado por el cliente: ' || $3,
-            updated_at = NOW()
-        WHERE request_id = $1 AND company_id = $2
-        RETURNING request_id, status, updated_at
+        SET status = 'CANCELED'
+        WHERE service_request_id = $1
+        RETURNING service_request_id, status
       `;
 
-      const result = await pool.query(cancelQuery, [id, clientCompanyId, cancellation_reason]);
+      const result = await pool.query(cancelQuery, [id]);
 
-      return ResponseHandler.success(res, 'Solicitud de servicio cancelada exitosamente', {
-        request_id: result.rows[0].request_id,
-        status: result.rows[0].status,
-        updated_at: result.rows[0].updated_at
-      });
+      return ResponseHandler.success(res, {
+        request_id: result.rows[0].service_request_id,
+        status: result.rows[0].status
+      }, 'Solicitud de servicio cancelada exitosamente');
 
     } catch (error) {
       console.error('Error en cancelServiceRequest:', error);
@@ -494,67 +446,71 @@ class ClientServiceRequestsController {
       // Estadísticas por estado
       const statusStatsQuery = `
         SELECT 
-          status,
+          sr.status,
           COUNT(*) as count,
           AVG(
             CASE 
-              WHEN completion_date IS NOT NULL THEN 
-                EXTRACT(EPOCH FROM (completion_date - request_date))/86400
+              WHEN sr.completion_date IS NOT NULL THEN 
+                EXTRACT(EPOCH FROM (sr.completion_date - sr.request_date))/86400
             END
           ) as avg_completion_days
-        FROM service_requests 
-        WHERE company_id = $1
-        AND request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY status
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        WHERE e.company_id = $1
+        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
+        GROUP BY sr.status
       `;
 
       // Estadísticas por tipo de servicio
       const typeStatsQuery = `
         SELECT 
-          request_type,
+          sr.issue_type as request_type,
           COUNT(*) as count,
-          AVG(COALESCE(actual_cost, estimated_cost, 0)) as avg_cost
-        FROM service_requests 
-        WHERE company_id = $1
-        AND request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY request_type
+          0 as avg_cost
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        WHERE e.company_id = $1
+        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
+        GROUP BY sr.issue_type
         ORDER BY count DESC
       `;
 
       // Estadísticas por prioridad
       const priorityStatsQuery = `
         SELECT 
-          priority,
+          sr.priority,
           COUNT(*) as count,
           AVG(
             CASE 
-              WHEN completion_date IS NOT NULL THEN 
-                EXTRACT(EPOCH FROM (completion_date - request_date))/86400
+              WHEN sr.completion_date IS NOT NULL THEN 
+                EXTRACT(EPOCH FROM (sr.completion_date - sr.request_date))/86400
             END
           ) as avg_completion_days
-        FROM service_requests 
-        WHERE company_id = $1
-        AND request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY priority
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        WHERE e.company_id = $1
+        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
+        GROUP BY sr.priority
         ORDER BY 
-          CASE priority 
-            WHEN 'ALTA' THEN 1 
-            WHEN 'MEDIA' THEN 2 
-            WHEN 'BAJA' THEN 3 
+          CASE sr.priority 
+            WHEN 'HIGH' THEN 1 
+            WHEN 'MEDIUM' THEN 2 
+            WHEN 'LOW' THEN 3 
           END
       `;
 
       // Tendencia mensual
       const monthlyTrendQuery = `
         SELECT 
-          DATE_TRUNC('month', request_date) as month,
+          DATE_TRUNC('month', sr.request_date) as month,
           COUNT(*) as total_requests,
-          COUNT(CASE WHEN status = 'COMPLETADO' THEN 1 END) as completed_requests,
-          AVG(COALESCE(actual_cost, estimated_cost, 0)) as avg_cost
-        FROM service_requests 
-        WHERE company_id = $1
-        AND request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY DATE_TRUNC('month', request_date)
+          COUNT(CASE WHEN sr.status = 'CLOSED' THEN 1 END) as completed_requests,
+          0 as avg_cost
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        WHERE e.company_id = $1
+        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
+        GROUP BY DATE_TRUNC('month', sr.request_date)
         ORDER BY month DESC
       `;
 
@@ -576,19 +532,19 @@ class ClientServiceRequestsController {
 
       // Calcular totales
       const totalRequests = statusResult.rows.reduce((sum, row) => sum + parseInt(row.count), 0);
-      const completedRequests = statusStats.COMPLETADO?.count || 0;
+      const completedRequests = statusStats.CLOSED?.count || 0;
       const completionRate = totalRequests > 0 ? (completedRequests / totalRequests * 100) : 0;
 
-      return ResponseHandler.success(res, 'Estadísticas de solicitudes obtenidas exitosamente', {
+      return ResponseHandler.success(res, {
         summary: {
           totalRequests,
           completedRequests,
-          pendingRequests: statusStats.PENDIENTE?.count || 0,
-          scheduledRequests: statusStats.PROGRAMADO?.count || 0,
-          inProgressRequests: statusStats.EN_PROGRESO?.count || 0,
-          cancelledRequests: statusStats.CANCELADO?.count || 0,
+          openRequests: statusStats.OPEN?.count || 0,
+          assignedRequests: statusStats.ASSIGNED?.count || 0,
+          inProgressRequests: statusStats.IN_PROGRESS?.count || 0,
+          cancelledRequests: statusStats.CANCELED?.count || 0,
           completionRate: parseFloat(completionRate.toFixed(2)),
-          avgCompletionDays: statusStats.COMPLETADO?.avgCompletionDays || 0
+          avgCompletionDays: statusStats.CLOSED?.avgCompletionDays || 0
         },
         statusStatistics: statusStats,
         typeStatistics: typeResult.rows.map(row => ({
@@ -609,7 +565,7 @@ class ClientServiceRequestsController {
           completionRate: row.total_requests > 0 ? (row.completed_requests / row.total_requests * 100) : 0
         })),
         analysisПериод: parseInt(months)
-      });
+      }, 'Estadísticas de solicitudes obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getServiceRequestStatistics:', error);
