@@ -17,7 +17,7 @@ router.get('/dashboard', dashboardController.getDashboardData);
 router.get('/dashboard/metrics', dashboardController.getDashboardMetrics);
 router.get('/dashboard/service-requests', dashboardController.getRecentServiceRequests);
 router.get('/dashboard/maintenances', dashboardController.getUpcomingMaintenances);
-router.get('/dashboard ', dashboardController.getCriticalAlerts);
+router.get('/dashboard/alerts', dashboardController.getCriticalAlerts);
 
 // ===================================
 // CLIENTS ROUTES
