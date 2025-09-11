@@ -1,577 +1,535 @@
-const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
+const db = require('../../lib/database');
 
-class ClientServiceRequestsController {
-  
-  // GET /api/client/service-requests - Obtener solicitudes de servicio del cliente
+class ServiceRequestsController {
+  // GET /api/client/service-requests - Obtener solicitudes de servicio
   async getServiceRequests(req, res) {
     try {
-      const clientCompanyId = req.user.company_id;
+      const { clientCompanyId } = req.user;
       const { 
-        status = '',
-        priority = '',
-        page = 1,
-        limit = 20,
-        equipment_id = '',
-        date_from = '',
-        date_to = ''
+        page = 1, 
+        limit = 20, 
+        status, 
+        priority, 
+        equipmentId,
+        startDate,
+        endDate,
+        search 
       } = req.query;
-
       const offset = (page - 1) * limit;
 
-      // Construir filtros dinámicamente
-      let whereConditions = ['e.company_id = $1'];
+      let whereClause = `WHERE sr.client_company_id = $1`;
       let queryParams = [clientCompanyId];
       let paramCount = 1;
 
       if (status) {
-        paramCount++;
-        whereConditions.push(`sr.status = $${paramCount}`);
+        whereClause += ` AND sr.status = $${++paramCount}`;
         queryParams.push(status);
       }
 
       if (priority) {
-        paramCount++;
-        whereConditions.push(`sr.priority = $${paramCount}`);
+        whereClause += ` AND sr.priority = $${++paramCount}`;
         queryParams.push(priority);
       }
 
-      if (equipment_id) {
-        paramCount++;
-        whereConditions.push(`sr.equipment_id = $${paramCount}`);
-        queryParams.push(equipment_id);
+      if (equipmentId) {
+        whereClause += ` AND sr.equipment_id = $${++paramCount}`;
+        queryParams.push(equipmentId);
       }
 
-      if (date_from) {
-        paramCount++;
-        whereConditions.push(`sr.request_date >= $${paramCount}`);
-        queryParams.push(date_from);
+      if (startDate) {
+        whereClause += ` AND sr.request_date >= $${++paramCount}`;
+        queryParams.push(startDate);
       }
 
-      if (date_to) {
-        paramCount++;
-        whereConditions.push(`sr.request_date <= $${paramCount}`);
-        queryParams.push(date_to);
+      if (endDate) {
+        whereClause += ` AND sr.request_date <= $${++paramCount}`;
+        queryParams.push(endDate);
       }
 
-      const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+      if (search) {
+        whereClause += ` AND (sr.title ILIKE $${++paramCount} OR sr.description ILIKE $${++paramCount})`;
+        queryParams.push(`%${search}%`, `%${search}%`);
+      }
 
-      const serviceRequestsQuery = `
+      const query = `
         SELECT 
-          sr.service_request_id as request_id,
-          sr.equipment_id,
-          sr.issue_type as request_type,
-          sr.priority,
-          sr.status,
-          sr.description,
-          sr.request_date,
-          sr.scheduled_date,
-          sr.completion_date,
-          sr.description as notes,
+          sr.*,
           e.name as equipment_name,
           e.type as equipment_type,
-          el.address as location_name,
+          e.model as equipment_model,
+          provider.name as provider_name,
+          provider.phone as provider_phone,
+          u.name as technician_name,
+          u.phone as technician_phone,
+          el.name as location_name,
           el.address as location_address,
-          u.name as requested_by_name
+          -- Calcular tiempo transcurrido
+          CASE 
+            WHEN sr.completion_date IS NOT NULL THEN 
+              EXTRACT(epoch FROM (sr.completion_date - sr.request_date)) / 3600
+            ELSE 
+              EXTRACT(epoch FROM (CURRENT_TIMESTAMP - sr.request_date)) / 3600
+          END as hours_elapsed
         FROM service_requests sr
         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
-        LEFT JOIN users u ON sr.user_id = u.user_id
+        LEFT JOIN companies provider ON sr.provider_company_id = provider.company_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
+        LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
         ${whereClause}
         ORDER BY 
-          CASE sr.priority 
-            WHEN 'HIGH' THEN 1 
-            WHEN 'MEDIUM' THEN 2 
-            WHEN 'LOW' THEN 3 
+          CASE sr.priority
+            WHEN 'URGENT' THEN 1
+            WHEN 'HIGH' THEN 2
+            WHEN 'MEDIUM' THEN 3
+            WHEN 'LOW' THEN 4
           END,
           sr.request_date DESC
-        LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
       `;
 
       queryParams.push(limit, offset);
 
-      // Query para contar total
+      const result = await db.query(query, queryParams);
+
+      // Count total para paginación
       const countQuery = `
         SELECT COUNT(*) as total
         FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
         ${whereClause}
       `;
 
-      const [requestsResult, countResult] = await Promise.all([
-        pool.query(serviceRequestsQuery, queryParams),
-        pool.query(countQuery, queryParams.slice(0, -2))
-      ]);
-
-      const serviceRequests = requestsResult.rows;
+      const countResult = await db.query(countQuery, queryParams.slice(0, -2));
       const totalRequests = parseInt(countResult.rows[0].total);
-      const totalPages = Math.ceil(totalRequests / limit);
 
-      // Estadísticas de estado
-      const statusStatsQuery = `
+      const serviceRequests = result.rows.map(sr => ({
+        serviceRequestId: sr.service_request_id.toString(),
+        title: sr.title,
+        description: sr.description,
+        status: sr.status,
+        priority: sr.priority,
+        requestDate: sr.request_date,
+        scheduledDate: sr.scheduled_date,
+        completionDate: sr.completion_date,
+        estimatedCost: sr.estimated_cost ? parseFloat(sr.estimated_cost) : null,
+        finalCost: sr.final_cost ? parseFloat(sr.final_cost) : null,
+        equipment: {
+          equipmentId: sr.equipment_id.toString(),
+          name: sr.equipment_name,
+          type: sr.equipment_type,
+          model: sr.equipment_model
+        },
+        provider: {
+          name: sr.provider_name,
+          phone: sr.provider_phone
+        },
+        technician: sr.technician_name ? {
+          name: sr.technician_name,
+          phone: sr.technician_phone
+        } : null,
+        location: {
+          name: sr.location_name,
+          address: sr.location_address
+        },
+        hoursElapsed: parseFloat(sr.hours_elapsed),
+        notes: sr.notes,
+        workCompleted: sr.work_completed
+      }));
+
+      // Obtener estadísticas para filtros
+      const statsQuery = `
         SELECT 
           sr.status,
-          COUNT(*) as count,
-          AVG(
-            CASE 
-              WHEN sr.completion_date IS NOT NULL THEN 
-                EXTRACT(EPOCH FROM (sr.completion_date - sr.request_date))/86400
-            END
-          ) as avg_completion_days
+          COUNT(*) as count
         FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        ${whereClause}
+        WHERE sr.client_company_id = $1
         GROUP BY sr.status
       `;
 
-      const statusStatsResult = await pool.query(statusStatsQuery, queryParams.slice(0, -2));
-      const statusStats = statusStatsResult.rows.reduce((acc, row) => {
-        acc[row.status] = {
-          count: parseInt(row.count),
-          avgCompletionDays: parseFloat(row.avg_completion_days) || 0
-        };
-        return acc;
-      }, {});
+      const statsResult = await db.query(statsQuery, [clientCompanyId]);
+      const statusStats = {};
+      statsResult.rows.forEach(row => {
+        statusStats[row.status] = parseInt(row.count);
+      });
 
       return ResponseHandler.success(res, {
         serviceRequests,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalRequests,
-          hasNextPage: page < totalPages,
-          hasPreviousPage: page > 1
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalRequests,
+          totalPages: Math.ceil(totalRequests / limit)
         },
-        statusStatistics: statusStats,
-        filters: {
-          status,
-          priority,
-          equipment_id,
-          date_from,
-          date_to
-        }
+        stats: statusStats
       }, 'Solicitudes de servicio obtenidas exitosamente');
 
     } catch (error) {
       console.error('Error en getServiceRequests:', error);
-      return ResponseHandler.error(res, 'Error al obtener solicitudes de servicio', 'FETCH_SERVICE_REQUESTS_ERROR');
-    }
-  }
-
-  // GET /api/client/service-requests/:id - Obtener detalles de solicitud específica
-  async getServiceRequestDetails(req, res) {
-    try {
-      const clientCompanyId = req.user.company_id;
-      const { id } = req.params;
-
-      const detailQuery = `
-        SELECT 
-          sr.service_request_id as request_id,
-          sr.equipment_id,
-          sr.issue_type as request_type,
-          sr.priority,
-          sr.status,
-          sr.description,
-          sr.request_date,
-          sr.scheduled_date,
-          sr.completion_date,
-          e.name as equipment_name,
-          e.type as equipment_type,
-          e.model,
-          e.serial_number,
-          el.address as location_name,
-          el.address as location_address,
-          u.name as requested_by_name,
-          u.email as requested_by_email
-        FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
-        LEFT JOIN users u ON sr.user_id = u.user_id
-        WHERE sr.service_request_id = $1 
-        AND e.company_id = $2
-      `;
-
-      const result = await pool.query(detailQuery, [id, clientCompanyId]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Solicitud de servicio no encontrada');
-      }
-
-      const serviceRequest = result.rows[0];
-
-      // Obtener historial de actualizaciones (si existe una tabla de log)
-      // Por ahora simulamos algunas actualizaciones basadas en los campos de fecha
-      const timeline = [];
-
-      timeline.push({
-        event: 'CREADA',
-        date: serviceRequest.created_at,
-        description: 'Solicitud de servicio creada',
-        status: 'PENDIENTE'
-      });
-
-      if (serviceRequest.scheduled_date) {
-        timeline.push({
-          event: 'PROGRAMADA',
-          date: serviceRequest.scheduled_date,
-          description: `Servicio programado para ${new Date(serviceRequest.scheduled_date).toLocaleDateString()}`,
-          status: 'PROGRAMADO'
-        });
-      }
-
-      if (serviceRequest.completion_date) {
-        timeline.push({
-          event: 'COMPLETADA',
-          date: serviceRequest.completion_date,
-          description: 'Servicio completado exitosamente',
-          status: 'COMPLETADO'
-        });
-      }
-
-      return ResponseHandler.success(res, {
-        serviceRequest,
-        timeline: timeline.sort((a, b) => new Date(a.date) - new Date(b.date))
-      }, 'Detalles de solicitud obtenidos exitosamente');
-
-    } catch (error) {
-      console.error('Error en getServiceRequestDetails:', error);
-      return ResponseHandler.error(res, 'Error al obtener detalles de solicitud', 'FETCH_SERVICE_REQUEST_DETAILS_ERROR');
+      return ResponseHandler.error(res, 'Error al obtener solicitudes de servicio', 'GET_SERVICE_REQUESTS_ERROR', 500);
     }
   }
 
   // POST /api/client/service-requests - Crear nueva solicitud de servicio
   async createServiceRequest(req, res) {
     try {
-      const clientCompanyId = req.user.company_id;
-      const userId = req.user.user_id;
+      const { clientCompanyId } = req.user;
       const {
-        equipment_id,
-        request_type,
+        equipmentId,
+        title,
+        description,
         priority = 'MEDIUM',
-        description
+        scheduledDate
       } = req.body;
 
-      // Validaciones
-      if (!equipment_id || !request_type || !description) {
-        return ResponseHandler.badRequest(res, 'Equipo, tipo de solicitud y descripción son obligatorios');
+      // Verificar que el equipo está rentado por este cliente
+      const equipmentCheck = await db.query(`
+        SELECT ar.provider_company_id, e.name as equipment_name
+        FROM active_rentals ar
+        INNER JOIN equipments e ON ar.equipment_id = e.equipment_id
+        WHERE ar.equipment_id = $1 AND ar.client_company_id = $2 AND ar.status = 'ACTIVE'
+      `, [equipmentId, clientCompanyId]);
+
+      if (equipmentCheck.rows.length === 0) {
+        return ResponseHandler.error(res, 'Equipo no encontrado o no rentado por su empresa', 'EQUIPMENT_NOT_FOUND', 404);
       }
 
-        // Verificar que el equipo pertenezca a la empresa del cliente
-        const equipmentCheck = await pool.query(
-          'SELECT equipment_id, name FROM equipments WHERE equipment_id = $1 AND company_id = $2',
-          [equipment_id, clientCompanyId]
-        );      if (equipmentCheck.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Equipo no encontrado o no autorizado');
-      }
+      const providerCompanyId = equipmentCheck.rows[0].provider_company_id;
 
-        // Obtener proveedor por defecto para este tipo de equipo (simplificado)
-        // En un sistema real, habría lógica más compleja para asignar proveedores
-        const providerQuery = `
-          SELECT company_id, name 
-          FROM companies 
-          WHERE business_type = 'PROVEEDOR' 
-          ORDER BY company_id ASC 
-          LIMIT 1
-        `;      const providerResult = await pool.query(providerQuery);
-      const providerId = providerResult.rows.length > 0 ? providerResult.rows[0].company_id : null;
+      const insertQuery = `
+        INSERT INTO service_requests (
+          equipment_id, 
+          client_company_id, 
+          provider_company_id,
+          title, 
+          description, 
+          priority, 
+          status,
+          scheduled_date,
+          request_date
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, CURRENT_TIMESTAMP)
+        RETURNING service_request_id
+      `;
 
-        const createQuery = `
-          INSERT INTO service_requests (
-            equipment_id,
-            user_id,
-            description,
-            priority,
-            issue_type,
-            status,
-            request_date
-          )
-          VALUES ($1, $2, $3, $4, $5, 'OPEN', NOW())
-          RETURNING service_request_id, request_date, status
-        `;
+      const result = await db.query(insertQuery, [
+        equipmentId, 
+        clientCompanyId, 
+        providerCompanyId,
+        title, 
+        description, 
+        priority,
+        scheduledDate
+      ]);
 
-        const result = await pool.query(createQuery, [
-          equipment_id,
-          userId,
-          description,
-          priority,
-          request_type
-        ]);
+      const serviceRequestId = result.rows[0].service_request_id;
 
-        const newRequest = result.rows[0];
+      // Obtener la solicitud creada con detalles
+      const serviceRequest = await this.getServiceRequestById(serviceRequestId, clientCompanyId);
 
-        return ResponseHandler.success(res, {
-          request_id: newRequest.service_request_id,
-          status: newRequest.status,
-          request_date: newRequest.request_date,
-          equipment_name: equipmentCheck.rows[0].name
-        }, 'Solicitud de servicio creada exitosamente', 201);
+      return ResponseHandler.success(res, {
+        serviceRequest
+      }, 'Solicitud de servicio creada exitosamente', 201);
 
     } catch (error) {
       console.error('Error en createServiceRequest:', error);
-      return ResponseHandler.error(res, 'Error al crear solicitud de servicio', 'CREATE_SERVICE_REQUEST_ERROR');
+      return ResponseHandler.error(res, 'Error al crear solicitud de servicio', 'CREATE_SERVICE_REQUEST_ERROR', 500);
     }
   }
 
-  // PUT /api/client/service-requests/:id - Actualizar solicitud (solo ciertos campos)
+  // GET /api/client/service-requests/:id - Obtener detalles de una solicitud
+  async getServiceRequestDetails(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+
+      const serviceRequest = await this.getServiceRequestById(id, clientCompanyId);
+
+      if (!serviceRequest) {
+        return ResponseHandler.error(res, 'Solicitud de servicio no encontrada', 'SERVICE_REQUEST_NOT_FOUND', 404);
+      }
+
+      // Obtener historial de actualizaciones
+      const updatesQuery = `
+        SELECT 
+          sru.*,
+          u.name as updated_by_name
+        FROM service_request_updates sru
+        LEFT JOIN users u ON sru.updated_by = u.user_id
+        WHERE sru.service_request_id = $1
+        ORDER BY sru.update_date DESC
+      `;
+
+      const updatesResult = await db.query(updatesQuery, [id]);
+
+      const updates = updatesResult.rows.map(update => ({
+        updateId: update.update_id.toString(),
+        status: update.status,
+        notes: update.notes,
+        updateDate: update.update_date,
+        updatedBy: update.updated_by_name
+      }));
+
+      return ResponseHandler.success(res, {
+        serviceRequest: {
+          ...serviceRequest,
+          updates
+        }
+      }, 'Detalles de solicitud obtenidos exitosamente');
+
+    } catch (error) {
+      console.error('Error en getServiceRequestDetails:', error);
+      return ResponseHandler.error(res, 'Error al obtener detalles de solicitud', 'GET_SERVICE_REQUEST_DETAILS_ERROR', 500);
+    }
+  }
+
+  // PUT /api/client/service-requests/:id - Actualizar solicitud de servicio
   async updateServiceRequest(req, res) {
     try {
-      const clientCompanyId = req.user.company_id;
+      const { clientCompanyId } = req.user;
       const { id } = req.params;
       const {
-        request_type,
-        priority = 'MEDIUM',
-        description
+        title,
+        description,
+        priority,
+        scheduledDate,
+        notes
       } = req.body;
 
-      // Verificar que la solicitud existe y pertenece al cliente
-      const existingRequest = await pool.query(
-        `SELECT sr.service_request_id, sr.status 
-         FROM service_requests sr
-         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-         WHERE sr.service_request_id = $1 AND e.company_id = $2`,
-        [id, clientCompanyId]
-      );
-
-      if (existingRequest.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Solicitud de servicio no encontrada');
+      // Verificar que la solicitud pertenece al cliente
+      const existingRequest = await this.getServiceRequestById(id, clientCompanyId);
+      if (!existingRequest) {
+        return ResponseHandler.error(res, 'Solicitud de servicio no encontrada', 'SERVICE_REQUEST_NOT_FOUND', 404);
       }
 
-      // Solo permitir actualizar si está en estado PENDIENTE o PROGRAMADO
-      const currentStatus = existingRequest.rows[0].status;
-      if (!['OPEN', 'ASSIGNED'].includes(currentStatus)) {
-        return ResponseHandler.badRequest(res, 'No se puede actualizar una solicitud en estado: ' + currentStatus);
+      // Solo permitir actualizar si está en estado PENDING
+      if (existingRequest.status !== 'PENDING') {
+        return ResponseHandler.error(res, 'Solo se pueden modificar solicitudes pendientes', 'CANNOT_UPDATE_REQUEST', 400);
       }
-
-      // Construir query de actualización dinámicamente
-      const updateFields = [];
-      const queryParams = [];
-      let paramCount = 0;
-
-      if (description !== undefined) {
-        paramCount++;
-        updateFields.push(`description = $${paramCount}`);
-        queryParams.push(description);
-      }
-
-      if (request_type !== undefined) {
-        paramCount++;
-        updateFields.push(`issue_type = $${paramCount}`);
-        queryParams.push(request_type);
-      }
-
-      if (priority !== undefined && ['LOW', 'MEDIUM', 'HIGH'].includes(priority)) {
-        paramCount++;
-        updateFields.push(`priority = $${paramCount}`);
-        queryParams.push(priority);
-      }
-
-      if (updateFields.length === 0) {
-        return ResponseHandler.badRequest(res, 'No hay campos válidos para actualizar');
-      }
-
-      queryParams.push(id);
 
       const updateQuery = `
         UPDATE service_requests 
-        SET ${updateFields.join(', ')}
-        WHERE service_request_id = $${paramCount + 1}
-        RETURNING service_request_id, status
+        SET 
+          title = COALESCE($1, title),
+          description = COALESCE($2, description),
+          priority = COALESCE($3, priority),
+          scheduled_date = COALESCE($4, scheduled_date),
+          notes = COALESCE($5, notes),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE service_request_id = $6 AND client_company_id = $7
+        RETURNING service_request_id
       `;
 
-      const result = await pool.query(updateQuery, queryParams);
+      await db.query(updateQuery, [
+        title, description, priority, scheduledDate, notes, id, clientCompanyId
+      ]);
+
+      const updatedRequest = await this.getServiceRequestById(id, clientCompanyId);
 
       return ResponseHandler.success(res, {
-        request_id: result.rows[0].service_request_id,
-        status: result.rows[0].status
+        serviceRequest: updatedRequest
       }, 'Solicitud de servicio actualizada exitosamente');
 
     } catch (error) {
       console.error('Error en updateServiceRequest:', error);
-      return ResponseHandler.error(res, 'Error al actualizar solicitud de servicio', 'UPDATE_SERVICE_REQUEST_ERROR');
+      return ResponseHandler.error(res, 'Error al actualizar solicitud', 'UPDATE_SERVICE_REQUEST_ERROR', 500);
     }
   }
 
-  // DELETE /api/client/service-requests/:id - Cancelar solicitud
+  // DELETE /api/client/service-requests/:id - Cancelar solicitud de servicio
   async cancelServiceRequest(req, res) {
     try {
-      const clientCompanyId = req.user.company_id;
+      const { clientCompanyId } = req.user;
       const { id } = req.params;
-      const { cancellation_reason = '' } = req.body;
 
-      // Verificar que la solicitud existe y pertenece al cliente
-      const existingRequest = await pool.query(
-        `SELECT sr.service_request_id, sr.status 
-         FROM service_requests sr
-         INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-         WHERE sr.service_request_id = $1 AND e.company_id = $2`,
-        [id, clientCompanyId]
-      );
-
-      if (existingRequest.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Solicitud de servicio no encontrada');
+      // Verificar que la solicitud pertenece al cliente
+      const existingRequest = await this.getServiceRequestById(id, clientCompanyId);
+      if (!existingRequest) {
+        return ResponseHandler.error(res, 'Solicitud de servicio no encontrada', 'SERVICE_REQUEST_NOT_FOUND', 404);
       }
 
-      // Solo permitir cancelar si está en estado PENDIENTE o PROGRAMADO
-      const currentStatus = existingRequest.rows[0].status;
-      if (!['OPEN', 'ASSIGNED'].includes(currentStatus)) {
-        return ResponseHandler.badRequest(res, 'No se puede cancelar una solicitud en estado: ' + currentStatus);
+      // Solo permitir cancelar si está en estado PENDING o APPROVED
+      if (!['PENDING', 'APPROVED'].includes(existingRequest.status)) {
+        return ResponseHandler.error(res, 'Solo se pueden cancelar solicitudes pendientes o aprobadas', 'CANNOT_CANCEL_REQUEST', 400);
       }
 
       const cancelQuery = `
         UPDATE service_requests 
-        SET status = 'CANCELED'
-        WHERE service_request_id = $1
-        RETURNING service_request_id, status
+        SET 
+          status = 'CANCELLED',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE service_request_id = $1 AND client_company_id = $2
       `;
 
-      const result = await pool.query(cancelQuery, [id]);
+      await db.query(cancelQuery, [id, clientCompanyId]);
 
       return ResponseHandler.success(res, {
-        request_id: result.rows[0].service_request_id,
-        status: result.rows[0].status
-      }, 'Solicitud de servicio cancelada exitosamente');
+        message: 'Solicitud de servicio cancelada exitosamente'
+      }, 'Solicitud cancelada exitosamente');
 
     } catch (error) {
       console.error('Error en cancelServiceRequest:', error);
-      return ResponseHandler.error(res, 'Error al cancelar solicitud de servicio', 'CANCEL_SERVICE_REQUEST_ERROR');
+      return ResponseHandler.error(res, 'Error al cancelar solicitud', 'CANCEL_SERVICE_REQUEST_ERROR', 500);
     }
   }
 
-  // GET /api/client/service-requests/statistics - Estadísticas de solicitudes
-  async getServiceRequestStatistics(req, res) {
+  // GET /api/client/service-requests/stats - Estadísticas de solicitudes
+  async getServiceRequestsStats(req, res) {
     try {
-      const clientCompanyId = req.user.company_id;
-      const { months = 12 } = req.query;
+      const { clientCompanyId } = req.user;
+      const { startDate, endDate } = req.query;
 
-      // Estadísticas por estado
-      const statusStatsQuery = `
-        SELECT 
-          sr.status,
-          COUNT(*) as count,
-          AVG(
-            CASE 
-              WHEN sr.completion_date IS NOT NULL THEN 
-                EXTRACT(EPOCH FROM (sr.completion_date - sr.request_date))/86400
-            END
-          ) as avg_completion_days
-        FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        WHERE e.company_id = $1
-        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY sr.status
-      `;
+      let dateFilter = '';
+      let queryParams = [clientCompanyId];
 
-      // Estadísticas por tipo de servicio
-      const typeStatsQuery = `
-        SELECT 
-          sr.issue_type as request_type,
-          COUNT(*) as count,
-          0 as avg_cost
-        FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        WHERE e.company_id = $1
-        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY sr.issue_type
-        ORDER BY count DESC
-      `;
+      if (startDate || endDate) {
+        let conditions = [];
+        if (startDate) {
+          conditions.push(`sr.request_date >= $${queryParams.length + 1}`);
+          queryParams.push(startDate);
+        }
+        if (endDate) {
+          conditions.push(`sr.request_date <= $${queryParams.length + 1}`);
+          queryParams.push(endDate);
+        }
+        dateFilter = `AND ${conditions.join(' AND ')}`;
+      }
 
-      // Estadísticas por prioridad
-      const priorityStatsQuery = `
+      const statsQuery = `
         SELECT 
-          sr.priority,
-          COUNT(*) as count,
-          AVG(
-            CASE 
-              WHEN sr.completion_date IS NOT NULL THEN 
-                EXTRACT(EPOCH FROM (sr.completion_date - sr.request_date))/86400
-            END
-          ) as avg_completion_days
-        FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        WHERE e.company_id = $1
-        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY sr.priority
-        ORDER BY 
-          CASE sr.priority 
-            WHEN 'HIGH' THEN 1 
-            WHEN 'MEDIUM' THEN 2 
-            WHEN 'LOW' THEN 3 
-          END
-      `;
-
-      // Tendencia mensual
-      const monthlyTrendQuery = `
-        SELECT 
-          DATE_TRUNC('month', sr.request_date) as month,
           COUNT(*) as total_requests,
-          COUNT(CASE WHEN sr.status = 'CLOSED' THEN 1 END) as completed_requests,
-          0 as avg_cost
+          COUNT(CASE WHEN sr.status = 'PENDING' THEN 1 END) as pending_requests,
+          COUNT(CASE WHEN sr.status = 'APPROVED' THEN 1 END) as approved_requests,
+          COUNT(CASE WHEN sr.status = 'IN_PROGRESS' THEN 1 END) as in_progress_requests,
+          COUNT(CASE WHEN sr.status = 'COMPLETED' THEN 1 END) as completed_requests,
+          COUNT(CASE WHEN sr.status = 'CANCELLED' THEN 1 END) as cancelled_requests,
+          COUNT(CASE WHEN sr.priority = 'URGENT' THEN 1 END) as urgent_requests,
+          AVG(CASE 
+            WHEN sr.completion_date IS NOT NULL THEN 
+              EXTRACT(epoch FROM (sr.completion_date - sr.request_date)) / 3600
+          END) as avg_completion_hours,
+          SUM(sr.final_cost) as total_service_cost,
+          AVG(sr.final_cost) as avg_service_cost
         FROM service_requests sr
-        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
-        WHERE e.company_id = $1
-        AND sr.request_date >= NOW() - INTERVAL '${parseInt(months)} months'
-        GROUP BY DATE_TRUNC('month', sr.request_date)
-        ORDER BY month DESC
+        WHERE sr.client_company_id = $1 ${dateFilter}
       `;
 
-      const [statusResult, typeResult, priorityResult, trendResult] = await Promise.all([
-        pool.query(statusStatsQuery, [clientCompanyId]),
-        pool.query(typeStatsQuery, [clientCompanyId]),
-        pool.query(priorityStatsQuery, [clientCompanyId]),
-        pool.query(monthlyTrendQuery, [clientCompanyId])
-      ]);
+      const result = await db.query(statsQuery, queryParams);
+      const stats = result.rows[0];
 
-      // Procesar estadísticas por estado
-      const statusStats = statusResult.rows.reduce((acc, row) => {
-        acc[row.status] = {
-          count: parseInt(row.count),
-          avgCompletionDays: parseFloat(row.avg_completion_days) || 0
-        };
-        return acc;
-      }, {});
+      // Estadísticas por equipo
+      const equipmentStatsQuery = `
+        SELECT 
+          e.name as equipment_name,
+          e.type as equipment_type,
+          COUNT(sr.service_request_id) as total_requests,
+          SUM(sr.final_cost) as total_cost
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        WHERE sr.client_company_id = $1 ${dateFilter}
+        GROUP BY e.equipment_id, e.name, e.type
+        ORDER BY total_requests DESC
+        LIMIT 10
+      `;
 
-      // Calcular totales
-      const totalRequests = statusResult.rows.reduce((sum, row) => sum + parseInt(row.count), 0);
-      const completedRequests = statusStats.CLOSED?.count || 0;
-      const completionRate = totalRequests > 0 ? (completedRequests / totalRequests * 100) : 0;
+      const equipmentResult = await db.query(equipmentStatsQuery, queryParams);
 
       return ResponseHandler.success(res, {
         summary: {
-          totalRequests,
-          completedRequests,
-          openRequests: statusStats.OPEN?.count || 0,
-          assignedRequests: statusStats.ASSIGNED?.count || 0,
-          inProgressRequests: statusStats.IN_PROGRESS?.count || 0,
-          cancelledRequests: statusStats.CANCELED?.count || 0,
-          completionRate: parseFloat(completionRate.toFixed(2)),
-          avgCompletionDays: statusStats.CLOSED?.avgCompletionDays || 0
+          totalRequests: parseInt(stats.total_requests),
+          pendingRequests: parseInt(stats.pending_requests),
+          approvedRequests: parseInt(stats.approved_requests),
+          inProgressRequests: parseInt(stats.in_progress_requests),
+          completedRequests: parseInt(stats.completed_requests),
+          cancelledRequests: parseInt(stats.cancelled_requests),
+          urgentRequests: parseInt(stats.urgent_requests),
+          avgCompletionHours: stats.avg_completion_hours ? parseFloat(stats.avg_completion_hours) : null,
+          totalServiceCost: stats.total_service_cost ? parseFloat(stats.total_service_cost) : 0,
+          avgServiceCost: stats.avg_service_cost ? parseFloat(stats.avg_service_cost) : null
         },
-        statusStatistics: statusStats,
-        typeStatistics: typeResult.rows.map(row => ({
-          request_type: row.request_type,
-          count: parseInt(row.count),
-          avgCost: parseFloat(row.avg_cost) || 0
-        })),
-        priorityStatistics: priorityResult.rows.map(row => ({
-          priority: row.priority,
-          count: parseInt(row.count),
-          avgCompletionDays: parseFloat(row.avg_completion_days) || 0
-        })),
-        monthlyTrend: trendResult.rows.map(row => ({
-          month: row.month,
-          totalRequests: parseInt(row.total_requests),
-          completedRequests: parseInt(row.completed_requests),
-          avgCost: parseFloat(row.avg_cost) || 0,
-          completionRate: row.total_requests > 0 ? (row.completed_requests / row.total_requests * 100) : 0
-        })),
-        analysisПериод: parseInt(months)
+        equipmentStats: equipmentResult.rows.map(item => ({
+          equipmentName: item.equipment_name,
+          equipmentType: item.equipment_type,
+          totalRequests: parseInt(item.total_requests),
+          totalCost: item.total_cost ? parseFloat(item.total_cost) : 0
+        }))
       }, 'Estadísticas de solicitudes obtenidas exitosamente');
 
     } catch (error) {
-      console.error('Error en getServiceRequestStatistics:', error);
-      return ResponseHandler.error(res, 'Error al obtener estadísticas de solicitudes', 'FETCH_SERVICE_REQUEST_STATISTICS_ERROR');
+      console.error('Error en getServiceRequestsStats:', error);
+      return ResponseHandler.error(res, 'Error al obtener estadísticas', 'GET_STATS_ERROR', 500);
+    }
+  }
+
+  // Método auxiliar para obtener solicitud por ID
+  async getServiceRequestById(serviceRequestId, clientCompanyId) {
+    try {
+      const query = `
+        SELECT 
+          sr.*,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          e.model as equipment_model,
+          provider.name as provider_name,
+          provider.phone as provider_phone,
+          provider.email as provider_email,
+          u.name as technician_name,
+          u.phone as technician_phone,
+          el.name as location_name,
+          el.address as location_address
+        FROM service_requests sr
+        INNER JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN companies provider ON sr.provider_company_id = provider.company_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
+        LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
+        WHERE sr.service_request_id = $1 AND sr.client_company_id = $2
+      `;
+
+      const result = await db.query(query, [serviceRequestId, clientCompanyId]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const sr = result.rows[0];
+
+      return {
+        serviceRequestId: sr.service_request_id.toString(),
+        title: sr.title,
+        description: sr.description,
+        status: sr.status,
+        priority: sr.priority,
+        requestDate: sr.request_date,
+        scheduledDate: sr.scheduled_date,
+        completionDate: sr.completion_date,
+        estimatedCost: sr.estimated_cost ? parseFloat(sr.estimated_cost) : null,
+        finalCost: sr.final_cost ? parseFloat(sr.final_cost) : null,
+        equipment: {
+          equipmentId: sr.equipment_id.toString(),
+          name: sr.equipment_name,
+          type: sr.equipment_type,
+          model: sr.equipment_model
+        },
+        provider: {
+          name: sr.provider_name,
+          phone: sr.provider_phone,
+          email: sr.provider_email
+        },
+        technician: sr.technician_name ? {
+          name: sr.technician_name,
+          phone: sr.technician_phone
+        } : null,
+        location: {
+          name: sr.location_name,
+          address: sr.location_address
+        },
+        notes: sr.notes,
+        workCompleted: sr.work_completed
+      };
+
+    } catch (error) {
+      console.error('Error en getServiceRequestById:', error);
+      throw error;
     }
   }
 }
 
-module.exports = new ClientServiceRequestsController();
+module.exports = new ServiceRequestsController();

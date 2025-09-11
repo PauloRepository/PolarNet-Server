@@ -6,7 +6,7 @@ const router = express.Router();
 const authController = require('../../controllers/auth.controller');
 const authValidations = require('../../validations/auth.validation');
 const { handleValidationErrors } = require('../../validations/common.validation');
-const { authenticateToken } = require('../../helpers/auth');
+const { authenticate } = require('../../middlewares/auth.middleware');
 const { authRateLimit } = require('../../middlewares/security.middleware');
 
 /**
@@ -42,7 +42,7 @@ router.post(
  */
 router.get(
   '/profile',
-  authenticateToken,
+  authenticate,
   authController.getProfile
 );
 
@@ -53,7 +53,7 @@ router.get(
  */
 router.post(
   '/verify-token',
-  authenticateToken,
+  authenticate,
   authController.verifyToken
 );
 

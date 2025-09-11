@@ -1,582 +1,660 @@
-const pool = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
-const bcrypt = require('bcrypt');
+const db = require('../../lib/database');
 
-class ClientProfileController {
-  
-  // GET /api/client/profile - Obtener información del perfil completo
+class ProfileController {
+  // GET /api/client/profile - Obtener perfil de empresa
   async getProfile(req, res) {
     try {
-      const userId = req.user.user_id;
-      const clientCompanyId = req.user.company_id;
+      const { clientCompanyId } = req.user;
 
-      const profileQuery = `
+      const companyQuery = `
         SELECT 
-          u.user_id,
-          u.email,
-          u.full_name,
-          u.phone,
-          u.position,
-          u.status as user_status,
-          u.created_at as user_since,
-          u.updated_at as last_updated,
-          c.company_id,
-          c.company_name,
-          c.company_type,
-          c.tax_id,
-          c.contact_email as company_email,
-          c.contact_phone as company_phone,
-          c.address,
-          c.city,
-          c.state,
-          c.country,
-          c.postal_code,
-          c.website,
-          c.status as company_status,
-          c.subscription_plan,
-          c.plan_expiry_date,
-          c.created_at as company_since,
-          -- Contar recursos de la empresa
-          (SELECT COUNT(*) FROM equipments WHERE company_id = c.company_id) as total_equipments,
-          (SELECT COUNT(*) FROM users WHERE company_id = c.company_id AND status = 'ACTIVO') as active_users,
-          (SELECT COUNT(*) FROM service_requests WHERE company_id = c.company_id) as total_service_requests,
-          (SELECT COUNT(*) FROM maintenances WHERE company_id = c.company_id) as total_maintenances
-        FROM users u
-        INNER JOIN companies c ON u.company_id = c.company_id
-        WHERE u.user_id = $1 AND u.company_id = $2
+          c.*,
+          COUNT(DISTINCT u.user_id) as total_users,
+          COUNT(DISTINCT l.location_id) as total_locations,
+          COUNT(DISTINCT ar.rental_id) as active_rentals
+        FROM companies c
+        LEFT JOIN users u ON c.company_id = u.company_id AND u.status = 'ACTIVE'
+        LEFT JOIN company_locations l ON c.company_id = l.company_id AND l.status = 'ACTIVE'
+        LEFT JOIN active_rentals ar ON c.company_id = ar.client_company_id
+        WHERE c.company_id = $1
+        GROUP BY c.company_id
       `;
 
-      const result = await pool.query(profileQuery, [userId, clientCompanyId]);
+      const result = await db.query(companyQuery, [clientCompanyId]);
 
       if (result.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Perfil de usuario no encontrado');
+        return ResponseHandler.error(res, 'Empresa no encontrada', 'COMPANY_NOT_FOUND', 404);
       }
 
-      const profile = result.rows[0];
+      const company = result.rows[0];
 
-      // Obtener estadísticas de actividad reciente
-      const activityStatsQuery = `
-        SELECT 
-          (SELECT COUNT(*) FROM service_requests 
-           WHERE company_id = $1 AND request_date >= NOW() - INTERVAL '30 days') as recent_service_requests,
-          (SELECT COUNT(*) FROM maintenances 
-           WHERE company_id = $1 AND scheduled_date >= NOW() - INTERVAL '30 days') as recent_maintenances,
-          (SELECT COUNT(*) FROM temperature_readings tr
-           INNER JOIN equipments e ON tr.equipment_id = e.equipment_id
-           WHERE e.company_id = $1 AND tr.reading_date >= NOW() - INTERVAL '24 hours') as recent_temperature_readings,
-          (SELECT COUNT(*) FROM energy_readings er
-           INNER JOIN equipments e ON er.equipment_id = e.equipment_id
-           WHERE e.company_id = $1 AND er.reading_date >= NOW() - INTERVAL '24 hours') as recent_energy_readings
-      `;
-
-      const activityResult = await pool.query(activityStatsQuery, [clientCompanyId]);
-      const activityStats = activityResult.rows[0];
-
-      // Información del plan de suscripción
-      const subscriptionInfo = {
-        plan: profile.subscription_plan || 'BASICO',
-        expiryDate: profile.plan_expiry_date,
-        daysUntilExpiry: profile.plan_expiry_date 
-          ? Math.ceil((new Date(profile.plan_expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
-          : null,
-        isExpired: profile.plan_expiry_date 
-          ? new Date(profile.plan_expiry_date) < new Date()
-          : false
-      };
-
-      // Límites del plan (esto podría venir de una configuración)
-      const planLimits = {
-        BASICO: { equipments: 10, users: 3, storage: '1GB' },
-        ESTANDAR: { equipments: 50, users: 10, storage: '10GB' },
-        PREMIUM: { equipments: 200, users: 50, storage: '100GB' },
-        EMPRESARIAL: { equipments: -1, users: -1, storage: 'Ilimitado' }
-      };
-
-      const currentPlanLimits = planLimits[profile.subscription_plan] || planLimits.BASICO;
-
-      return ResponseHandler.success(res, 'Perfil obtenido exitosamente', {
-        user: {
-          user_id: profile.user_id,
-          email: profile.email,
-          full_name: profile.full_name,
-          phone: profile.phone,
-          position: profile.position,
-          status: profile.user_status,
-          userSince: profile.user_since,
-          lastUpdated: profile.last_updated
-        },
+      return ResponseHandler.success(res, {
         company: {
-          company_id: profile.company_id,
-          company_name: profile.company_name,
-          company_type: profile.company_type,
-          tax_id: profile.tax_id,
-          contact_email: profile.company_email,
-          contact_phone: profile.company_phone,
-          address: profile.address,
-          city: profile.city,
-          state: profile.state,
-          country: profile.country,
-          postal_code: profile.postal_code,
-          website: profile.website,
-          status: profile.company_status,
-          companySince: profile.company_since
-        },
-        subscription: subscriptionInfo,
-        planLimits: currentPlanLimits,
-        usage: {
-          totalEquipments: parseInt(profile.total_equipments) || 0,
-          activeUsers: parseInt(profile.active_users) || 0,
-          totalServiceRequests: parseInt(profile.total_service_requests) || 0,
-          totalMaintenances: parseInt(profile.total_maintenances) || 0
-        },
-        recentActivity: {
-          serviceRequestsLast30Days: parseInt(activityStats.recent_service_requests) || 0,
-          maintenancesLast30Days: parseInt(activityStats.recent_maintenances) || 0,
-          temperatureReadingsLast24Hours: parseInt(activityStats.recent_temperature_readings) || 0,
-          energyReadingsLast24Hours: parseInt(activityStats.recent_energy_readings) || 0
+          companyId: company.company_id.toString(),
+          name: company.name,
+          email: company.email,
+          phone: company.phone,
+          address: company.address,
+          city: company.city,
+          state: company.state,
+          zipCode: company.zip_code,
+          country: company.country,
+          taxId: company.tax_id,
+          website: company.website,
+          industry: company.industry,
+          companySize: company.company_size,
+          description: company.description,
+          logoUrl: company.logo_url,
+          status: company.status,
+          createdAt: company.created_at,
+          stats: {
+            totalUsers: parseInt(company.total_users),
+            totalLocations: parseInt(company.total_locations),
+            activeRentals: parseInt(company.active_rentals)
+          }
         }
-      });
+      }, 'Perfil de empresa obtenido exitosamente');
 
     } catch (error) {
       console.error('Error en getProfile:', error);
-      return ResponseHandler.error(res, 'Error al obtener perfil', 'FETCH_PROFILE_ERROR');
+      return ResponseHandler.error(res, 'Error al obtener perfil', 'GET_PROFILE_ERROR', 500);
     }
   }
 
-  // PUT /api/client/profile/user - Actualizar información personal del usuario
-  async updateUserProfile(req, res) {
+  // PUT /api/client/profile - Actualizar perfil de empresa
+  async updateProfile(req, res) {
     try {
-      const userId = req.user.user_id;
-      const clientCompanyId = req.user.company_id;
+      const { clientCompanyId } = req.user;
       const {
-        full_name,
+        name,
+        email,
         phone,
-        position
-      } = req.body;
-
-      // Validaciones básicas
-      if (!full_name || full_name.trim().length < 2) {
-        return ResponseHandler.badRequest(res, 'El nombre completo debe tener al menos 2 caracteres');
-      }
-
-      const updateQuery = `
-        UPDATE users 
-        SET full_name = $1,
-            phone = $2,
-            position = $3,
-            updated_at = NOW()
-        WHERE user_id = $4 AND company_id = $5
-        RETURNING user_id, full_name, phone, position, updated_at
-      `;
-
-      const result = await pool.query(updateQuery, [
-        full_name.trim(),
-        phone || null,
-        position || null,
-        userId,
-        clientCompanyId
-      ]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Usuario no encontrado');
-      }
-
-      return ResponseHandler.success(res, 'Perfil de usuario actualizado exitosamente', {
-        user: result.rows[0]
-      });
-
-    } catch (error) {
-      console.error('Error en updateUserProfile:', error);
-      return ResponseHandler.error(res, 'Error al actualizar perfil de usuario', 'UPDATE_USER_PROFILE_ERROR');
-    }
-  }
-
-  // PUT /api/client/profile/company - Actualizar información de la empresa
-  async updateCompanyProfile(req, res) {
-    try {
-      const clientCompanyId = req.user.company_id;
-      const {
-        company_name,
-        contact_email,
-        contact_phone,
         address,
         city,
         state,
+        zipCode,
         country,
-        postal_code,
-        website
+        website,
+        industry,
+        companySize,
+        description
       } = req.body;
-
-      // Validaciones básicas
-      if (!company_name || company_name.trim().length < 2) {
-        return ResponseHandler.badRequest(res, 'El nombre de la empresa debe tener al menos 2 caracteres');
-      }
-
-      if (contact_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact_email)) {
-        return ResponseHandler.badRequest(res, 'Email de contacto inválido');
-      }
 
       const updateQuery = `
         UPDATE companies 
-        SET company_name = $1,
-            contact_email = $2,
-            contact_phone = $3,
-            address = $4,
-            city = $5,
-            state = $6,
-            country = $7,
-            postal_code = $8,
-            website = $9,
-            updated_at = NOW()
-        WHERE company_id = $10 AND company_type = 'CLIENTE'
-        RETURNING company_id, company_name, contact_email, contact_phone, 
-                  address, city, state, country, postal_code, website, updated_at
+        SET 
+          name = $2,
+          email = $3,
+          phone = $4,
+          address = $5,
+          city = $6,
+          state = $7,
+          zip_code = $8,
+          country = $9,
+          website = $10,
+          industry = $11,
+          company_size = $12,
+          description = $13,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = $1
+        RETURNING *
       `;
 
-      const result = await pool.query(updateQuery, [
-        company_name.trim(),
-        contact_email || null,
-        contact_phone || null,
-        address || null,
-        city || null,
-        state || null,
-        country || null,
-        postal_code || null,
-        website || null,
-        clientCompanyId
+      const result = await db.query(updateQuery, [
+        clientCompanyId,
+        name,
+        email,
+        phone,
+        address,
+        city,
+        state,
+        zipCode,
+        country,
+        website,
+        industry,
+        companySize,
+        description
       ]);
 
       if (result.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Empresa no encontrada o no autorizada');
+        return ResponseHandler.error(res, 'Empresa no encontrada', 'COMPANY_NOT_FOUND', 404);
       }
 
-      return ResponseHandler.success(res, 'Perfil de empresa actualizado exitosamente', {
-        company: result.rows[0]
-      });
+      const company = result.rows[0];
+
+      return ResponseHandler.success(res, {
+        company: {
+          companyId: company.company_id.toString(),
+          name: company.name,
+          email: company.email,
+          phone: company.phone,
+          address: company.address,
+          city: company.city,
+          state: company.state,
+          zipCode: company.zip_code,
+          country: company.country,
+          website: company.website,
+          industry: company.industry,
+          companySize: company.company_size,
+          description: company.description,
+          updatedAt: company.updated_at
+        }
+      }, 'Perfil actualizado exitosamente');
 
     } catch (error) {
-      console.error('Error en updateCompanyProfile:', error);
-      return ResponseHandler.error(res, 'Error al actualizar perfil de empresa', 'UPDATE_COMPANY_PROFILE_ERROR');
+      console.error('Error en updateProfile:', error);
+      return ResponseHandler.error(res, 'Error al actualizar perfil', 'UPDATE_PROFILE_ERROR', 500);
     }
   }
 
-  // PUT /api/client/profile/password - Cambiar contraseña
-  async changePassword(req, res) {
+  // GET /api/client/profile/locations - Obtener ubicaciones de la empresa
+  async getLocations(req, res) {
     try {
-      const userId = req.user.user_id;
-      const { current_password, new_password } = req.body;
+      const { clientCompanyId } = req.user;
 
-      // Validaciones
-      if (!current_password || !new_password) {
-        return ResponseHandler.badRequest(res, 'Contraseña actual y nueva contraseña son obligatorias');
+      const locationsQuery = `
+        SELECT 
+          cl.*,
+          COUNT(DISTINCT ar.rental_id) as active_rentals
+        FROM company_locations cl
+        LEFT JOIN active_rentals ar ON cl.location_id = ar.location_id
+        WHERE cl.company_id = $1
+        GROUP BY cl.location_id
+        ORDER BY cl.is_main DESC, cl.name ASC
+      `;
+
+      const result = await db.query(locationsQuery, [clientCompanyId]);
+
+      const locations = result.rows.map(location => ({
+        locationId: location.location_id.toString(),
+        name: location.name,
+        address: location.address,
+        city: location.city,
+        state: location.state,
+        zipCode: location.zip_code,
+        country: location.country,
+        phone: location.phone,
+        email: location.email,
+        isMain: location.is_main,
+        status: location.status,
+        activeRentals: parseInt(location.active_rentals),
+        createdAt: location.created_at
+      }));
+
+      return ResponseHandler.success(res, {
+        locations
+      }, 'Ubicaciones obtenidas exitosamente');
+
+    } catch (error) {
+      console.error('Error en getLocations:', error);
+      return ResponseHandler.error(res, 'Error al obtener ubicaciones', 'GET_LOCATIONS_ERROR', 500);
+    }
+  }
+
+  // POST /api/client/profile/locations - Crear nueva ubicación
+  async createLocation(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const {
+        name,
+        address,
+        city,
+        state,
+        zipCode,
+        country,
+        phone,
+        email,
+        isMain = false
+      } = req.body;
+
+      // Si es ubicación principal, actualizar las demás
+      if (isMain) {
+        await db.query(`
+          UPDATE company_locations 
+          SET is_main = false 
+          WHERE company_id = $1
+        `, [clientCompanyId]);
       }
 
-      if (new_password.length < 8) {
-        return ResponseHandler.badRequest(res, 'La nueva contraseña debe tener al menos 8 caracteres');
+      const insertQuery = `
+        INSERT INTO company_locations (
+          company_id,
+          name,
+          address,
+          city,
+          state,
+          zip_code,
+          country,
+          phone,
+          email,
+          is_main,
+          status,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE', CURRENT_TIMESTAMP)
+        RETURNING *
+      `;
+
+      const result = await db.query(insertQuery, [
+        clientCompanyId,
+        name,
+        address,
+        city,
+        state,
+        zipCode,
+        country,
+        phone,
+        email,
+        isMain
+      ]);
+
+      const location = result.rows[0];
+
+      return ResponseHandler.success(res, {
+        location: {
+          locationId: location.location_id.toString(),
+          name: location.name,
+          address: location.address,
+          city: location.city,
+          state: location.state,
+          zipCode: location.zip_code,
+          country: location.country,
+          phone: location.phone,
+          email: location.email,
+          isMain: location.is_main,
+          status: location.status,
+          createdAt: location.created_at
+        }
+      }, 'Ubicación creada exitosamente');
+
+    } catch (error) {
+      console.error('Error en createLocation:', error);
+      return ResponseHandler.error(res, 'Error al crear ubicación', 'CREATE_LOCATION_ERROR', 500);
+    }
+  }
+
+  // PUT /api/client/profile/locations/:id - Actualizar ubicación
+  async updateLocation(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+      const {
+        name,
+        address,
+        city,
+        state,
+        zipCode,
+        country,
+        phone,
+        email,
+        isMain
+      } = req.body;
+
+      // Verificar que la ubicación pertenece a la empresa
+      const checkQuery = `
+        SELECT location_id FROM company_locations 
+        WHERE location_id = $1 AND company_id = $2
+      `;
+
+      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
+
+      if (checkResult.rows.length === 0) {
+        return ResponseHandler.error(res, 'Ubicación no encontrada', 'LOCATION_NOT_FOUND', 404);
       }
 
-      // Verificar contraseña actual
-      const userQuery = 'SELECT password_hash FROM users WHERE user_id = $1';
-      const userResult = await pool.query(userQuery, [userId]);
-
-      if (userResult.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Usuario no encontrado');
+      // Si es ubicación principal, actualizar las demás
+      if (isMain) {
+        await db.query(`
+          UPDATE company_locations 
+          SET is_main = false 
+          WHERE company_id = $1 AND location_id != $2
+        `, [clientCompanyId, id]);
       }
 
-      const isCurrentPasswordValid = await bcrypt.compare(current_password, userResult.rows[0].password_hash);
+      const updateQuery = `
+        UPDATE company_locations 
+        SET 
+          name = $3,
+          address = $4,
+          city = $5,
+          state = $6,
+          zip_code = $7,
+          country = $8,
+          phone = $9,
+          email = $10,
+          is_main = $11,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE location_id = $1 AND company_id = $2
+        RETURNING *
+      `;
 
-      if (!isCurrentPasswordValid) {
-        return ResponseHandler.badRequest(res, 'La contraseña actual es incorrecta');
+      const result = await db.query(updateQuery, [
+        id,
+        clientCompanyId,
+        name,
+        address,
+        city,
+        state,
+        zipCode,
+        country,
+        phone,
+        email,
+        isMain
+      ]);
+
+      const location = result.rows[0];
+
+      return ResponseHandler.success(res, {
+        location: {
+          locationId: location.location_id.toString(),
+          name: location.name,
+          address: location.address,
+          city: location.city,
+          state: location.state,
+          zipCode: location.zip_code,
+          country: location.country,
+          phone: location.phone,
+          email: location.email,
+          isMain: location.is_main,
+          status: location.status,
+          updatedAt: location.updated_at
+        }
+      }, 'Ubicación actualizada exitosamente');
+
+    } catch (error) {
+      console.error('Error en updateLocation:', error);
+      return ResponseHandler.error(res, 'Error al actualizar ubicación', 'UPDATE_LOCATION_ERROR', 500);
+    }
+  }
+
+  // DELETE /api/client/profile/locations/:id - Eliminar ubicación
+  async deleteLocation(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+
+      // Verificar que no sea la ubicación principal
+      const checkQuery = `
+        SELECT location_id, is_main FROM company_locations 
+        WHERE location_id = $1 AND company_id = $2
+      `;
+
+      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
+
+      if (checkResult.rows.length === 0) {
+        return ResponseHandler.error(res, 'Ubicación no encontrada', 'LOCATION_NOT_FOUND', 404);
       }
 
-      // Generar hash de la nueva contraseña
-      const saltRounds = 12;
-      const newPasswordHash = await bcrypt.hash(new_password, saltRounds);
+      if (checkResult.rows[0].is_main) {
+        return ResponseHandler.error(res, 'No se puede eliminar la ubicación principal', 'CANNOT_DELETE_MAIN_LOCATION', 400);
+      }
 
-      // Actualizar contraseña
+      // Verificar que no tenga equipos activos
+      const equipmentCheck = await db.query(`
+        SELECT COUNT(*) as count
+        FROM active_rentals 
+        WHERE location_id = $1
+      `, [id]);
+
+      if (parseInt(equipmentCheck.rows[0].count) > 0) {
+        return ResponseHandler.error(res, 'No se puede eliminar ubicación con equipos activos', 'LOCATION_HAS_ACTIVE_RENTALS', 400);
+      }
+
+      await db.query(`
+        UPDATE company_locations 
+        SET status = 'INACTIVE', updated_at = CURRENT_TIMESTAMP
+        WHERE location_id = $1 AND company_id = $2
+      `, [id, clientCompanyId]);
+
+      return ResponseHandler.success(res, {
+        message: 'Ubicación eliminada exitosamente'
+      }, 'Ubicación eliminada exitosamente');
+
+    } catch (error) {
+      console.error('Error en deleteLocation:', error);
+      return ResponseHandler.error(res, 'Error al eliminar ubicación', 'DELETE_LOCATION_ERROR', 500);
+    }
+  }
+
+  // GET /api/client/profile/users - Obtener usuarios de la empresa
+  async getUsers(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+
+      const usersQuery = `
+        SELECT 
+          u.*,
+          COUNT(DISTINCT ar.rental_id) as managed_rentals
+        FROM users u
+        LEFT JOIN active_rentals ar ON u.user_id = ar.client_contact_id
+        WHERE u.company_id = $1
+        GROUP BY u.user_id
+        ORDER BY u.created_at DESC
+      `;
+
+      const result = await db.query(usersQuery, [clientCompanyId]);
+
+      const users = result.rows.map(user => ({
+        userId: user.user_id.toString(),
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        lastLogin: user.last_login,
+        managedRentals: parseInt(user.managed_rentals),
+        createdAt: user.created_at
+      }));
+
+      return ResponseHandler.success(res, {
+        users
+      }, 'Usuarios obtenidos exitosamente');
+
+    } catch (error) {
+      console.error('Error en getUsers:', error);
+      return ResponseHandler.error(res, 'Error al obtener usuarios', 'GET_USERS_ERROR', 500);
+    }
+  }
+
+  // POST /api/client/profile/users - Invitar nuevo usuario
+  async inviteUser(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const {
+        name,
+        email,
+        phone,
+        role = 'USER'
+      } = req.body;
+
+      // Verificar que el email no esté en uso
+      const emailCheck = await db.query(`
+        SELECT user_id FROM users WHERE email = $1
+      `, [email]);
+
+      if (emailCheck.rows.length > 0) {
+        return ResponseHandler.error(res, 'El email ya está en uso', 'EMAIL_ALREADY_EXISTS', 400);
+      }
+
+      const insertQuery = `
+        INSERT INTO users (
+          company_id,
+          name,
+          email,
+          phone,
+          role,
+          status,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, 'PENDING', CURRENT_TIMESTAMP)
+        RETURNING *
+      `;
+
+      const result = await db.query(insertQuery, [
+        clientCompanyId,
+        name,
+        email,
+        phone,
+        role
+      ]);
+
+      const user = result.rows[0];
+
+      return ResponseHandler.success(res, {
+        user: {
+          userId: user.user_id.toString(),
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          status: user.status,
+          createdAt: user.created_at
+        },
+        message: 'Invitación enviada. El usuario recibirá un email para completar el registro.'
+      }, 'Usuario invitado exitosamente');
+
+    } catch (error) {
+      console.error('Error en inviteUser:', error);
+      return ResponseHandler.error(res, 'Error al invitar usuario', 'INVITE_USER_ERROR', 500);
+    }
+  }
+
+  // PUT /api/client/profile/users/:id/status - Actualizar estado de usuario
+  async updateUserStatus(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+      const { status } = req.body;
+
+      // Verificar que el usuario pertenece a la empresa
+      const checkQuery = `
+        SELECT user_id FROM users 
+        WHERE user_id = $1 AND company_id = $2
+      `;
+
+      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
+
+      if (checkResult.rows.length === 0) {
+        return ResponseHandler.error(res, 'Usuario no encontrado', 'USER_NOT_FOUND', 404);
+      }
+
       const updateQuery = `
         UPDATE users 
-        SET password_hash = $1,
-            updated_at = NOW()
-        WHERE user_id = $2
-        RETURNING user_id, updated_at
+        SET status = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1 AND company_id = $2
+        RETURNING *
       `;
 
-      const result = await pool.query(updateQuery, [newPasswordHash, userId]);
+      const result = await db.query(updateQuery, [id, clientCompanyId, status]);
 
-      return ResponseHandler.success(res, 'Contraseña cambiada exitosamente', {
-        user_id: result.rows[0].user_id,
-        updated_at: result.rows[0].updated_at
-      });
+      const user = result.rows[0];
 
-    } catch (error) {
-      console.error('Error en changePassword:', error);
-      return ResponseHandler.error(res, 'Error al cambiar contraseña', 'CHANGE_PASSWORD_ERROR');
-    }
-  }
-
-  // GET /api/client/profile/subscription - Detalles de suscripción
-  async getSubscriptionDetails(req, res) {
-    try {
-      const clientCompanyId = req.user.company_id;
-
-      const subscriptionQuery = `
-        SELECT 
-          company_name,
-          subscription_plan,
-          plan_start_date,
-          plan_expiry_date,
-          billing_cycle,
-          monthly_cost,
-          annual_cost,
-          payment_method,
-          auto_renewal,
-          status
-        FROM companies 
-        WHERE company_id = $1 AND company_type = 'CLIENTE'
-      `;
-
-      const result = await pool.query(subscriptionQuery, [clientCompanyId]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.notFound(res, 'Información de suscripción no encontrada');
-      }
-
-      const subscription = result.rows[0];
-
-      // Calcular información adicional
-      const now = new Date();
-      const expiryDate = subscription.plan_expiry_date ? new Date(subscription.plan_expiry_date) : null;
-      
-      const subscriptionStatus = {
-        isActive: subscription.status === 'ACTIVO',
-        isExpired: expiryDate ? expiryDate < now : false,
-        daysUntilExpiry: expiryDate ? Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24)) : null,
-        daysUntilRenewal: subscription.auto_renewal && expiryDate ? Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24)) : null
-      };
-
-      // Características del plan actual
-      const planFeatures = {
-        BASICO: {
-          equipments: 10,
-          users: 3,
-          storage: '1GB',
-          monitoring: '24/7',
-          support: 'Email',
-          reports: 'Básicos',
-          alerts: 'Email'
-        },
-        ESTANDAR: {
-          equipments: 50,
-          users: 10,
-          storage: '10GB',
-          monitoring: '24/7',
-          support: 'Email + Chat',
-          reports: 'Avanzados',
-          alerts: 'Email + SMS'
-        },
-        PREMIUM: {
-          equipments: 200,
-          users: 50,
-          storage: '100GB',
-          monitoring: '24/7',
-          support: 'Email + Chat + Teléfono',
-          reports: 'Personalizados',
-          alerts: 'Email + SMS + Push'
-        },
-        EMPRESARIAL: {
-          equipments: 'Ilimitado',
-          users: 'Ilimitado',
-          storage: 'Ilimitado',
-          monitoring: '24/7 + Dedicado',
-          support: 'Soporte Prioritario 24/7',
-          reports: 'Personalizados + API',
-          alerts: 'Todos los canales + Webhooks'
+      return ResponseHandler.success(res, {
+        user: {
+          userId: user.user_id.toString(),
+          name: user.name,
+          email: user.email,
+          status: user.status,
+          updatedAt: user.updated_at
         }
-      };
-
-      const currentFeatures = planFeatures[subscription.subscription_plan] || planFeatures.BASICO;
-
-      return ResponseHandler.success(res, 'Detalles de suscripción obtenidos exitosamente', {
-        subscription: {
-          company_name: subscription.company_name,
-          plan: subscription.subscription_plan,
-          startDate: subscription.plan_start_date,
-          expiryDate: subscription.plan_expiry_date,
-          billingCycle: subscription.billing_cycle,
-          monthlyCost: parseFloat(subscription.monthly_cost) || 0,
-          annualCost: parseFloat(subscription.annual_cost) || 0,
-          paymentMethod: subscription.payment_method,
-          autoRenewal: subscription.auto_renewal,
-          status: subscription.status
-        },
-        subscriptionStatus,
-        planFeatures: currentFeatures,
-        availablePlans: ['BASICO', 'ESTANDAR', 'PREMIUM', 'EMPRESARIAL']
-      });
+      }, 'Estado de usuario actualizado exitosamente');
 
     } catch (error) {
-      console.error('Error en getSubscriptionDetails:', error);
-      return ResponseHandler.error(res, 'Error al obtener detalles de suscripción', 'FETCH_SUBSCRIPTION_DETAILS_ERROR');
+      console.error('Error en updateUserStatus:', error);
+      return ResponseHandler.error(res, 'Error al actualizar estado', 'UPDATE_USER_STATUS_ERROR', 500);
     }
   }
 
-  // GET /api/client/profile/activity - Registro de actividad del usuario
-  async getActivityLog(req, res) {
+  // GET /api/client/profile/activity - Obtener actividad de la empresa
+  async getCompanyActivity(req, res) {
     try {
-      const userId = req.user.user_id;
-      const clientCompanyId = req.user.company_id;
-      const { page = 1, limit = 20, days = 30 } = req.query;
-
+      const { clientCompanyId } = req.user;
+      const { 
+        page = 1, 
+        limit = 20,
+        startDate,
+        endDate 
+      } = req.query;
       const offset = (page - 1) * limit;
 
-      // Esta sería una tabla de logs de actividad (no existe en el schema actual, pero es una simulación)
-      // En un sistema real, tendrías una tabla audit_logs o activity_logs
-      
-      // Por ahora simulamos actividad basada en las acciones disponibles
-      const recentActivityQuery = `
-        SELECT 'service_request' as activity_type, 
-               'Solicitud de servicio creada' as description,
-               request_date as activity_date,
-               request_id as reference_id
-        FROM service_requests 
-        WHERE company_id = $1 AND requested_by = $2 
-        AND request_date >= NOW() - INTERVAL '${parseInt(days)} days'
-        
-        UNION ALL
-        
-        SELECT 'service_request_update' as activity_type,
-               'Solicitud de servicio actualizada' as description,
-               updated_at as activity_date,
-               request_id as reference_id
-        FROM service_requests 
-        WHERE company_id = $1 AND requested_by = $2
-        AND updated_at >= NOW() - INTERVAL '${parseInt(days)} days'
-        AND updated_at != created_at
-        
-        ORDER BY activity_date DESC
-        LIMIT $3 OFFSET $4
-      `;
+      let whereClause = `WHERE (
+        ar.client_company_id = $1 OR 
+        sr.client_company_id = $1 OR 
+        i.client_company_id = $1
+      )`;
+      let queryParams = [clientCompanyId];
+      let paramCount = 1;
 
-      const countQuery = `
-        SELECT COUNT(*) as total FROM (
-          SELECT request_date as activity_date FROM service_requests 
-          WHERE company_id = $1 AND requested_by = $2 
-          AND request_date >= NOW() - INTERVAL '${parseInt(days)} days'
+      if (startDate) {
+        whereClause += ` AND activity_date >= $${++paramCount}`;
+        queryParams.push(startDate);
+      }
+
+      if (endDate) {
+        whereClause += ` AND activity_date <= $${++paramCount}`;
+        queryParams.push(endDate);
+      }
+
+      const activityQuery = `
+        SELECT * FROM (
+          SELECT 
+            'RENTAL_STARTED' as activity_type,
+            ar.start_date as activity_date,
+            'Inicio de renta de ' || e.name as description,
+            ar.rental_id::text as reference_id
+          FROM active_rentals ar
+          LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+          WHERE ar.client_company_id = $1
           
           UNION ALL
           
-          SELECT updated_at as activity_date FROM service_requests 
-          WHERE company_id = $1 AND requested_by = $2
-          AND updated_at >= NOW() - INTERVAL '${parseInt(days)} days'
-          AND updated_at != created_at
+          SELECT 
+            'SERVICE_REQUEST' as activity_type,
+            sr.created_at as activity_date,
+            'Solicitud de servicio: ' || sr.description as description,
+            sr.request_id::text as reference_id
+          FROM service_requests sr
+          WHERE sr.client_company_id = $1
+          
+          UNION ALL
+          
+          SELECT 
+            'INVOICE_GENERATED' as activity_type,
+            i.invoice_date as activity_date,
+            'Factura generada: ' || i.invoice_number as description,
+            i.invoice_id::text as reference_id
+          FROM invoices i
+          WHERE i.client_company_id = $1
         ) activities
+        ${whereClause.replace('WHERE (', 'WHERE (')}
+        ORDER BY activity_date DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
       `;
 
-      const [activityResult, countResult] = await Promise.all([
-        pool.query(recentActivityQuery, [clientCompanyId, userId, limit, offset]),
-        pool.query(countQuery, [clientCompanyId, userId])
-      ]);
+      queryParams.push(limit, offset);
 
-      const activities = activityResult.rows;
-      const totalActivities = parseInt(countResult.rows[0].total);
-      const totalPages = Math.ceil(totalActivities / limit);
+      const result = await db.query(activityQuery, queryParams);
 
-      // Estadísticas de actividad por tipo
-      const activityStats = activities.reduce((acc, activity) => {
-        const type = activity.activity_type;
-        acc[type] = (acc[type] || 0) + 1;
-        return acc;
-      }, {});
+      const activities = result.rows.map(activity => ({
+        activityType: activity.activity_type,
+        activityDate: activity.activity_date,
+        description: activity.description,
+        referenceId: activity.reference_id
+      }));
 
-      return ResponseHandler.success(res, 'Registro de actividad obtenido exitosamente', {
+      return ResponseHandler.success(res, {
         activities,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalActivities,
-          hasNextPage: page < totalPages,
-          hasPreviousPage: page > 1
-        },
-        statistics: activityStats,
-        period: parseInt(days)
-      });
-
-    } catch (error) {
-      console.error('Error en getActivityLog:', error);
-      return ResponseHandler.error(res, 'Error al obtener registro de actividad', 'FETCH_ACTIVITY_LOG_ERROR');
-    }
-  }
-
-  // GET /api/client/profile/notifications - Configuración de notificaciones
-  async getNotificationSettings(req, res) {
-    try {
-      const userId = req.user.user_id;
-
-      // En un sistema real, tendrías una tabla user_notification_settings
-      // Por ahora simulamos configuraciones por defecto
-      const defaultSettings = {
-        email_notifications: {
-          service_requests: true,
-          maintenance_reminders: true,
-          temperature_alerts: true,
-          energy_alerts: false,
-          system_updates: true,
-          marketing: false
-        },
-        sms_notifications: {
-          urgent_alerts: true,
-          maintenance_reminders: false,
-          service_completion: true
-        },
-        push_notifications: {
-          all_alerts: true,
-          maintenance_reminders: true,
-          service_updates: true
-        },
-        notification_frequency: {
-          digest_frequency: 'daily', // 'immediate', 'daily', 'weekly'
-          quiet_hours_start: '22:00',
-          quiet_hours_end: '07:00'
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: activities.length
         }
-      };
-
-      return ResponseHandler.success(res, 'Configuración de notificaciones obtenida exitosamente', {
-        user_id: userId,
-        notification_settings: defaultSettings,
-        last_updated: new Date().toISOString()
-      });
+      }, 'Actividad empresarial obtenida exitosamente');
 
     } catch (error) {
-      console.error('Error en getNotificationSettings:', error);
-      return ResponseHandler.error(res, 'Error al obtener configuración de notificaciones', 'FETCH_NOTIFICATION_SETTINGS_ERROR');
-    }
-  }
-
-  // PUT /api/client/profile/notifications - Actualizar configuración de notificaciones
-  async updateNotificationSettings(req, res) {
-    try {
-      const userId = req.user.user_id;
-      const { notification_settings } = req.body;
-
-      if (!notification_settings) {
-        return ResponseHandler.badRequest(res, 'Configuración de notificaciones requerida');
-      }
-
-      // En un sistema real, aquí actualizarías la tabla user_notification_settings
-      // Por ahora simulamos la actualización exitosa
-      
-      return ResponseHandler.success(res, 'Configuración de notificaciones actualizada exitosamente', {
-        user_id: userId,
-        notification_settings,
-        updated_at: new Date().toISOString()
-      });
-
-    } catch (error) {
-      console.error('Error en updateNotificationSettings:', error);
-      return ResponseHandler.error(res, 'Error al actualizar configuración de notificaciones', 'UPDATE_NOTIFICATION_SETTINGS_ERROR');
+      console.error('Error en getCompanyActivity:', error);
+      return ResponseHandler.error(res, 'Error al obtener actividad', 'GET_ACTIVITY_ERROR', 500);
     }
   }
 }
 
-module.exports = new ClientProfileController();
+module.exports = new ProfileController();

@@ -1,79 +1,92 @@
 const express = require('express');
 const router = express.Router();
 
-// Controllers
+// Import new controllers
 const dashboardController = require('../../controllers/provider/dashboard.controller');
+const companyController = require('../../controllers/provider/company.controller');
 const clientsController = require('../../controllers/provider/clients.controller');
 const equipmentsController = require('../../controllers/provider/equipments.controller');
 const serviceRequestsController = require('../../controllers/provider/serviceRequests.controller');
-const maintenancesController = require('../../controllers/provider/maintenances.controller');
 const rentalsController = require('../../controllers/provider/rentals.controller');
+const maintenancesController = require('../../controllers/provider/maintenances.controller');
+const invoicesController = require('../../controllers/provider/invoices.controller');
 const profileController = require('../../controllers/provider/profile.controller');
 
-// ===================================
-// DASHBOARD ROUTES
-// ===================================
-router.get('/dashboard', dashboardController.getDashboardData);
-router.get('/dashboard/metrics', dashboardController.getDashboardMetrics);
-router.get('/dashboard/service-requests', dashboardController.getRecentServiceRequests);
-router.get('/dashboard/maintenances', dashboardController.getUpcomingMaintenances);
-router.get('/dashboard/alerts', dashboardController.getCriticalAlerts);
+// Validation middleware
+const { validateProvider } = require('../../middlewares/auth.middleware');
 
-// ===================================
-// CLIENTS ROUTES
-// ===================================
-router.get('/clients', clientsController.getAssignedClients);
-router.get('/clients/:clientId', clientsController.getClientDetails);
-router.get('/clients/:clientId/history', clientsController.getClientServiceHistory);
+// Apply provider validation to all routes
+router.use(validateProvider);
 
-// ===================================
-// EQUIPMENTS ROUTES
-// ===================================
+// Dashboard routes
+router.get('/dashboard', dashboardController.getDashboardMetrics);
+router.get('/dashboard/activities', dashboardController.getRecentActivities);
+router.get('/dashboard/alerts', dashboardController.getAlerts);
+router.get('/dashboard/performance', dashboardController.getPerformanceMetrics);
+
+// Company management routes
+router.get('/company', companyController.getCompany);
+router.put('/company', companyController.updateCompany);
+router.get('/company/locations', companyController.getLocations);
+router.post('/company/locations', companyController.createLocation);
+router.put('/company/locations/:id', companyController.updateLocation);
+router.delete('/company/locations/:id', companyController.deleteLocation);
+
+// Client management routes
+router.get('/clients', clientsController.getClients);
+router.get('/clients/:id', clientsController.getClientDetails);
+router.get('/clients/:id/service-history', clientsController.getClientServiceHistory);
+router.post('/clients/:id/notes', clientsController.addClientNote);
+
+// Equipment management routes
 router.get('/equipments', equipmentsController.getEquipments);
 router.post('/equipments', equipmentsController.createEquipment);
 router.get('/equipments/:id', equipmentsController.getEquipmentDetails);
 router.put('/equipments/:id', equipmentsController.updateEquipment);
 router.delete('/equipments/:id', equipmentsController.deleteEquipment);
 router.get('/equipments/:id/readings', equipmentsController.getEquipmentReadings);
-router.post('/equipments/:id/readings', equipmentsController.addEquipmentReading);
+router.post('/equipments/:id/move', equipmentsController.moveEquipment);
 
-// ===================================
-// SERVICE REQUESTS ROUTES
-// ===================================
+// Service requests routes
 router.get('/service-requests', serviceRequestsController.getServiceRequests);
-router.put('/service-requests/:id', serviceRequestsController.updateServiceRequest);
-router.get('/service-requests/stats', serviceRequestsController.getServiceRequestStats);
-router.post('/service-requests/:id/assign', serviceRequestsController.assignTechnician);
-router.post('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest);
+router.get('/service-requests/:id', serviceRequestsController.getServiceRequestDetails);
+router.put('/service-requests/:id/assign', serviceRequestsController.assignTechnician);
+router.put('/service-requests/:id/status', serviceRequestsController.updateStatus);
+router.put('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest);
+router.get('/service-requests/stats', serviceRequestsController.getServiceStats);
 
-// ===================================
-// MAINTENANCES ROUTES
-// ===================================
+// Rental management routes  
+router.get('/rentals', rentalsController.getRentals);
+router.get('/rentals/:id', rentalsController.getRentalDetails);
+router.post('/rentals', rentalsController.createRental);
+router.put('/rentals/:id', rentalsController.updateRental);
+router.put('/rentals/:id/terminate', rentalsController.terminateRental);
+router.get('/rentals/:id/payments', rentalsController.getRentalPayments);
+
+// Maintenance routes
 router.get('/maintenances', maintenancesController.getMaintenances);
 router.post('/maintenances', maintenancesController.createMaintenance);
 router.get('/maintenances/:id', maintenancesController.getMaintenanceDetails);
 router.put('/maintenances/:id', maintenancesController.updateMaintenance);
 router.delete('/maintenances/:id', maintenancesController.deleteMaintenance);
-router.post('/maintenances/:id/complete', maintenancesController.completeMaintenance);
-router.get('/maintenances/calendar', maintenancesController.getMaintenancesCalendar);
+router.get('/maintenances/calendar', maintenancesController.getMaintenanceCalendar);
 
-// ===================================
-// RENTALS ROUTES
-// ===================================
-router.get('/rentals', rentalsController.getRentals);
-router.post('/rentals', rentalsController.createRental);
-router.get('/rentals/:id', rentalsController.getRentalDetails);
-router.put('/rentals/:id', rentalsController.updateRental);
-router.delete('/rentals/:id', rentalsController.deleteRental);
-router.post('/rentals/:id/extend', rentalsController.extendRental);
+// Invoice management routes
+router.get('/invoices', invoicesController.getInvoices);
+router.post('/invoices', invoicesController.createInvoice);
+router.get('/invoices/:id', invoicesController.getInvoiceDetails);
+router.put('/invoices/:id', invoicesController.updateInvoice);
+router.put('/invoices/:id/send', invoicesController.sendInvoice);
+router.get('/invoices/stats', invoicesController.getInvoiceStats);
 
-// ===================================
-// PROFILE ROUTES
-// ===================================
+// Profile management routes
 router.get('/profile', profileController.getProfile);
-router.put('/profile', profileController.updateProfile);
-router.get('/profile/company', profileController.getCompanyProfile);
+router.put('/profile/user', profileController.updateUserProfile);
 router.put('/profile/company', profileController.updateCompanyProfile);
-router.get('/profile/stats', profileController.getProviderStats);
+router.put('/profile/password', profileController.changePassword);
+router.get('/profile/team', profileController.getTeamMembers);
+router.post('/profile/team', profileController.addTeamMember);
+router.put('/profile/team/:userId', profileController.updateTeamMember);
+router.delete('/profile/team/:userId', profileController.removeTeamMember);
 
 module.exports = router;

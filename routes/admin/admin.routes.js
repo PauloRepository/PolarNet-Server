@@ -8,13 +8,13 @@ const adminValidations = require('../../validations/admin.validation');
 const { handleValidationErrors } = require('../../validations/common.validation');
 
 /**
- * @route   GET /api/admin/users
+ * @route   POST /api/admin/users
  * @desc    Obtener lista de todos los usuarios (requiere contraseña de administrador)
  * @access  Privado (Admin)
  */
-router.get(
+router.post(
   '/users',
-  adminValidations.userQuery,
+  adminValidations.adminPassword,
   handleValidationErrors,
   adminController.getAllUsers
 );

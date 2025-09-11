@@ -1,319 +1,390 @@
-// controllers/provider/clients.controller.js
-const db = require('../../lib/database');
 const ResponseHandler = require('../../helpers/responseHandler');
+const db = require('../../lib/database');
 
-// Obtener clientes asignados al proveedor
-const getAssignedClients = async (req, res) => {
-  try {
-    const companyId = req.user.company_id;
-    const { search, status, limit = 50, offset = 0 } = req.query;
+class ClientsController {
+  // GET /api/provider/clients - Obtener lista de clientes
+  async getClients(req, res) {
+    try {
+      const { providerCompanyId } = req.user;
+      const { page = 1, limit = 20, search, status } = req.query;
+      const offset = (page - 1) * limit;
 
-    if (!companyId) {
-      return ResponseHandler.error(res, 'Usuario no tiene empresa asociada', 'NO_COMPANY_ASSOCIATED', 400);
-    }
+      let whereClause = `WHERE c.type = 'CLIENT'`;
+      let queryParams = [];
+      let paramCount = 0;
 
-    let query = `
-      SELECT DISTINCT
-        c.company_id,
-        c.name as company_name,
-        c.phone as company_phone,
-        c.email as company_email,
-        c.address as company_address,
-        c.business_type,
-        COUNT(DISTINCT e.equipment_id) as total_equipments,
-        COUNT(DISTINCT sr.service_request_id) as total_service_requests,
-        COUNT(DISTINCT m.maintenance_id) as total_maintenances,
-        MAX(sr.requested_date) as last_service_request,
-        MAX(m.scheduled_date) as last_maintenance
-      FROM companies c
-      JOIN equipments e ON c.company_id = e.company_id
-      LEFT JOIN service_requests sr ON e.equipment_id = sr.equipment_id 
-        AND sr.provider_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-      LEFT JOIN maintenances m ON e.equipment_id = m.equipment_id 
-        AND m.technician_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-      WHERE e.equipment_id IN (
-        SELECT DISTINCT equipment_id 
-        FROM service_requests 
-        WHERE provider_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-        UNION
-        SELECT DISTINCT equipment_id 
-        FROM maintenances 
-        WHERE technician_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-      )
-    `;
+      // Filtrar por empresas que tengan contratos activos con este proveedor
+      let joinClause = `
+        INNER JOIN active_rentals ar ON c.company_id = ar.client_company_id 
+        AND ar.provider_company_id = $${++paramCount}
+      `;
+      queryParams.push(providerCompanyId);
 
-    const queryParams = [companyId];
-    let paramIndex = 2;
-
-    if (search) {
-      query += ` AND (c.name ILIKE $${paramIndex} OR c.email ILIKE $${paramIndex})`;
-      queryParams.push(`%${search}%`);
-      paramIndex++;
-    }
-
-    query += ` 
-      GROUP BY c.company_id, c.name, c.phone, c.email, c.address, c.business_type
-      ORDER BY c.name ASC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-    `;
-    queryParams.push(parseInt(limit), parseInt(offset));
-
-    const result = await db.query(query, queryParams);
-
-    const clients = result.rows.map(row => ({
-      companyId: row.company_id.toString(),
-      companyName: row.company_name,
-      phone: row.company_phone,
-      email: row.company_email,
-      address: row.company_address,
-      businessType: row.business_type,
-      stats: {
-        totalEquipments: parseInt(row.total_equipments),
-        totalServiceRequests: parseInt(row.total_service_requests),
-        totalMaintenances: parseInt(row.total_maintenances),
-        lastServiceRequest: row.last_service_request,
-        lastMaintenance: row.last_maintenance
+      if (search) {
+        whereClause += ` AND (c.name ILIKE $${++paramCount} OR c.tax_id ILIKE $${++paramCount})`;
+        queryParams.push(`%${search}%`, `%${search}%`);
       }
-    }));
 
-    // Obtener conteo total
-    const countQuery = `
-      SELECT COUNT(DISTINCT c.company_id) as total
-      FROM companies c
-      JOIN equipments e ON c.company_id = e.company_id
-      WHERE e.equipment_id IN (
-        SELECT DISTINCT equipment_id 
-        FROM service_requests 
-        WHERE provider_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-        UNION
-        SELECT DISTINCT equipment_id 
-        FROM maintenances 
-        WHERE technician_user_id IN (SELECT user_id FROM users WHERE company_id = $1)
-      )
-      ${search ? `AND (c.name ILIKE $2 OR c.email ILIKE $2)` : ''}
-    `;
-
-    const countParams = search ? [companyId, `%${search}%`] : [companyId];
-    const countResult = await db.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].total);
-
-    return ResponseHandler.success(res, 'Clientes asignados obtenidos correctamente', {
-      clients,
-      pagination: {
-        total,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        hasMore: (parseInt(offset) + parseInt(limit)) < total
+      if (status) {
+        whereClause += ` AND c.is_active = $${++paramCount}`;
+        queryParams.push(status === 'active');
       }
-    });
 
-  } catch (error) {
-    console.error('Error obteniendo clientes asignados:', error);
-    return ResponseHandler.error(res, 'Error interno del servidor', 'INTERNAL_SERVER_ERROR', 500);
+      const query = `
+        SELECT DISTINCT
+          c.*,
+          COUNT(DISTINCT ar.rental_id) as active_rentals,
+          COUNT(DISTINCT sr.service_request_id) as pending_requests,
+          COUNT(DISTINCT e.equipment_id) as total_equipments
+        FROM companies c
+        ${joinClause}
+        LEFT JOIN service_requests sr ON c.company_id = sr.client_company_id 
+          AND sr.provider_company_id = $1 AND sr.status IN ('PENDING', 'IN_PROGRESS')
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        ${whereClause}
+        GROUP BY c.company_id
+        ORDER BY c.name ASC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+
+      queryParams.push(limit, offset);
+
+      const result = await db.query(query, queryParams);
+
+      // Count total para paginación
+      const countQuery = `
+        SELECT COUNT(DISTINCT c.company_id) as total
+        FROM companies c
+        INNER JOIN active_rentals ar ON c.company_id = ar.client_company_id 
+          AND ar.provider_company_id = $1
+        ${whereClause.replace(/\$\d+/g, (match) => {
+          const num = parseInt(match.slice(1));
+          return num > 1 ? `$${num - 1}` : match;
+        })}
+      `;
+
+      const countResult = await db.query(countQuery, queryParams.slice(1, -2));
+      const totalClients = parseInt(countResult.rows[0].total);
+
+      const clients = result.rows.map(client => ({
+        companyId: client.company_id.toString(),
+        name: client.name,
+        taxId: client.tax_id,
+        phone: client.phone,
+        email: client.email,
+        address: client.address,
+        city: client.city,
+        state: client.state,
+        businessType: client.business_type,
+        isActive: client.is_active,
+        stats: {
+          activeRentals: parseInt(client.active_rentals),
+          pendingRequests: parseInt(client.pending_requests),
+          totalEquipments: parseInt(client.total_equipments)
+        },
+        createdAt: client.created_at
+      }));
+
+      return ResponseHandler.success(res, {
+        clients,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalClients,
+          totalPages: Math.ceil(totalClients / limit)
+        }
+      }, 'Clientes obtenidos exitosamente');
+
+    } catch (error) {
+      console.error('Error en getClients:', error);
+      return ResponseHandler.error(res, 'Error al obtener clientes', 'GET_CLIENTS_ERROR', 500);
+    }
   }
-};
 
-// Obtener detalles de un cliente específico
-const getClientDetails = async (req, res) => {
-  try {
-    const { clientId } = req.params;
-    const companyId = req.user.company_id;
+  // GET /api/provider/clients/:id - Obtener detalles de un cliente
+  async getClientDetails(req, res) {
+    try {
+      const { providerCompanyId } = req.user;
+      const { id } = req.params;
 
-    if (!companyId) {
-      return ResponseHandler.error(res, 'Usuario no tiene empresa asociada', 'NO_COMPANY_ASSOCIATED', 400);
-    }
+      // Verificar que el cliente tenga relación con este proveedor
+      const relationCheck = await db.query(`
+        SELECT COUNT(*) as count 
+        FROM active_rentals 
+        WHERE client_company_id = $1 AND provider_company_id = $2
+      `, [id, providerCompanyId]);
 
-    // Verificar que el proveedor tiene acceso a este cliente
-    const accessQuery = `
-      SELECT DISTINCT c.company_id
-      FROM companies c
-      JOIN equipments e ON c.company_id = e.company_id
-      WHERE c.company_id = $1
-      AND e.equipment_id IN (
-        SELECT DISTINCT equipment_id 
-        FROM service_requests 
-        WHERE provider_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-        UNION
-        SELECT DISTINCT equipment_id 
-        FROM maintenances 
-        WHERE technician_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-      )
-    `;
+      if (parseInt(relationCheck.rows[0].count) === 0) {
+        return ResponseHandler.error(res, 'Cliente no encontrado o sin relación comercial', 'CLIENT_NOT_FOUND', 404);
+      }
 
-    const accessResult = await db.query(accessQuery, [clientId, companyId]);
-
-    if (accessResult.rows.length === 0) {
-      return ResponseHandler.error(res, 'Cliente no encontrado o sin acceso', 'CLIENT_NOT_FOUND', 404);
-    }
-
-    // Obtener detalles completos del cliente
-    const [clientResult, equipmentsResult, contactsResult] = await Promise.all([
-      // Datos básicos del cliente
-      db.query(`
+      // Obtener datos del cliente
+      const clientQuery = `
         SELECT 
           c.*,
-          COUNT(DISTINCT e.equipment_id) as total_equipments,
+          COUNT(DISTINCT ar.rental_id) as active_rentals,
           COUNT(DISTINCT sr.service_request_id) as total_service_requests,
-          COUNT(DISTINCT m.maintenance_id) as total_maintenances,
-          AVG(CASE WHEN sr.status = 'COMPLETADA' THEN 5 ELSE 3 END) as service_rating
+          COUNT(DISTINCT CASE WHEN sr.status IN ('PENDING', 'IN_PROGRESS') THEN sr.service_request_id END) as pending_requests,
+          COUNT(DISTINCT e.equipment_id) as total_equipments,
+          SUM(CASE WHEN i.status = 'PENDING' THEN i.total_amount ELSE 0 END) as pending_amount
         FROM companies c
-        LEFT JOIN equipments e ON c.company_id = e.company_id
-        LEFT JOIN service_requests sr ON e.equipment_id = sr.equipment_id 
-          AND sr.provider_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-        LEFT JOIN maintenances m ON e.equipment_id = m.equipment_id 
-          AND m.technician_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
+        LEFT JOIN active_rentals ar ON c.company_id = ar.client_company_id AND ar.provider_company_id = $2
+        LEFT JOIN service_requests sr ON c.company_id = sr.client_company_id AND sr.provider_company_id = $2
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        LEFT JOIN invoices i ON c.company_id = i.client_company_id AND i.provider_company_id = $2
         WHERE c.company_id = $1
         GROUP BY c.company_id
-      `, [clientId, companyId]),
+      `;
 
-      // Equipos del cliente bajo gestión
-      db.query(`
+      const clientResult = await db.query(clientQuery, [id, providerCompanyId]);
+
+      if (clientResult.rows.length === 0) {
+        return ResponseHandler.error(res, 'Cliente no encontrado', 'CLIENT_NOT_FOUND', 404);
+      }
+
+      const client = clientResult.rows[0];
+
+      // Obtener ubicaciones del cliente con equipos
+      const locationsQuery = `
         SELECT 
-          e.equipment_id,
-          e.name,
-          e.type,
-          e.status,
-          el.address as location
+          el.*,
+          COUNT(DISTINCT e.equipment_id) as equipment_count
+        FROM equipment_locations el
+        LEFT JOIN equipments e ON el.equipment_location_id = e.current_location_id
+        INNER JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+        WHERE el.company_id = $1 AND ar.provider_company_id = $2
+        GROUP BY el.equipment_location_id
+        ORDER BY el.name
+      `;
+
+      const locationsResult = await db.query(locationsQuery, [id, providerCompanyId]);
+
+      // Obtener equipos activos
+      const equipmentsQuery = `
+        SELECT 
+          e.*,
+          ar.rental_id,
+          ar.start_date,
+          ar.monthly_rate,
+          ar.status as rental_status,
+          el.name as location_name
         FROM equipments e
-        LEFT JOIN equipment_locations el ON e.equipment_location_id = el.equipment_location_id
-        WHERE e.company_id = $1
-        AND e.equipment_id IN (
-          SELECT DISTINCT equipment_id 
-          FROM service_requests 
-          WHERE provider_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-          UNION
-          SELECT DISTINCT equipment_id 
-          FROM maintenances 
-          WHERE technician_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-        )
+        INNER JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+        LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
+        WHERE ar.client_company_id = $1 AND ar.provider_company_id = $2
         ORDER BY e.name
-      `, [clientId, companyId]),
+      `;
 
-      // Contactos del cliente
-      db.query(`
+      const equipmentsResult = await db.query(equipmentsQuery, [id, providerCompanyId]);
+
+      // Obtener solicitudes de servicio recientes
+      const serviceRequestsQuery = `
         SELECT 
-          u.user_id,
-          u.name,
-          u.email,
-          u.phone
-        FROM users u
-        WHERE u.company_id = $1
-        AND u.role = 'CLIENTE'
-        ORDER BY u.name
-      `, [clientId])
-    ]);
+          sr.*,
+          e.name as equipment_name,
+          u.first_name || ' ' || u.last_name as assigned_technician
+        FROM service_requests sr
+        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
+        WHERE sr.client_company_id = $1 AND sr.provider_company_id = $2
+        ORDER BY sr.created_at DESC
+        LIMIT 10
+      `;
 
-    const client = clientResult.rows[0];
-    const equipments = equipmentsResult.rows;
-    const contacts = contactsResult.rows;
+      const serviceRequestsResult = await db.query(serviceRequestsQuery, [id, providerCompanyId]);
 
-    const clientDetails = {
-      companyId: client.company_id.toString(),
-      companyName: client.name,
-      phone: client.phone,
-      email: client.email,
-      address: client.address,
-      businessType: client.business_type,
-      stats: {
-        totalEquipments: parseInt(client.total_equipments),
-        totalServiceRequests: parseInt(client.total_service_requests),
-        totalMaintenances: parseInt(client.total_maintenances),
-        serviceRating: parseFloat(client.service_rating) || 0
-      },
-      equipments: equipments.map(eq => ({
-        equipmentId: eq.equipment_id.toString(),
-        name: eq.name,
-        type: eq.type,
-        status: eq.status,
-        location: eq.location
-      })),
-      contacts: contacts.map(contact => ({
-        userId: contact.user_id.toString(),
-        name: contact.name,
-        email: contact.email,
-        phone: contact.phone
-      }))
-    };
+      return ResponseHandler.success(res, {
+        client: {
+          companyId: client.company_id.toString(),
+          name: client.name,
+          taxId: client.tax_id,
+          phone: client.phone,
+          email: client.email,
+          address: client.address,
+          city: client.city,
+          state: client.state,
+          postalCode: client.postal_code,
+          businessType: client.business_type,
+          description: client.description,
+          isActive: client.is_active,
+          createdAt: client.created_at,
+          stats: {
+            activeRentals: parseInt(client.active_rentals),
+            totalServiceRequests: parseInt(client.total_service_requests),
+            pendingRequests: parseInt(client.pending_requests),
+            totalEquipments: parseInt(client.total_equipments),
+            pendingAmount: parseFloat(client.pending_amount) || 0
+          }
+        },
+        locations: locationsResult.rows.map(location => ({
+          locationId: location.equipment_location_id.toString(),
+          name: location.name,
+          address: location.address,
+          city: location.city,
+          state: location.state,
+          contactPerson: location.contact_person,
+          contactPhone: location.contact_phone,
+          equipmentCount: parseInt(location.equipment_count)
+        })),
+        equipments: equipmentsResult.rows.map(equipment => ({
+          equipmentId: equipment.equipment_id.toString(),
+          name: equipment.name,
+          type: equipment.type,
+          model: equipment.model,
+          serialNumber: equipment.serial_number,
+          rentalId: equipment.rental_id.toString(),
+          startDate: equipment.start_date,
+          monthlyRate: parseFloat(equipment.monthly_rate),
+          rentalStatus: equipment.rental_status,
+          locationName: equipment.location_name,
+          status: equipment.status
+        })),
+        recentServiceRequests: serviceRequestsResult.rows.map(sr => ({
+          requestId: sr.service_request_id.toString(),
+          type: sr.request_type,
+          priority: sr.priority,
+          status: sr.status,
+          description: sr.description,
+          equipmentName: sr.equipment_name,
+          assignedTechnician: sr.assigned_technician,
+          createdAt: sr.created_at,
+          scheduledDate: sr.scheduled_date
+        }))
+      }, 'Detalles del cliente obtenidos exitosamente');
 
-    return ResponseHandler.success(res, 'Detalles del cliente obtenidos correctamente', clientDetails);
-
-  } catch (error) {
-    console.error('Error obteniendo detalles del cliente:', error);
-    return ResponseHandler.error(res, 'Error interno del servidor', 'INTERNAL_SERVER_ERROR', 500);
-  }
-};
-
-// Obtener historial de servicios para un cliente
-const getClientServiceHistory = async (req, res) => {
-  try {
-    const { clientId } = req.params;
-    const companyId = req.user.company_id;
-    const { limit = 20, offset = 0, status } = req.query;
-
-    if (!companyId) {
-      return ResponseHandler.error(res, 'Usuario no tiene empresa asociada', 'NO_COMPANY_ASSOCIATED', 400);
+    } catch (error) {
+      console.error('Error en getClientDetails:', error);
+      return ResponseHandler.error(res, 'Error al obtener detalles del cliente', 'GET_CLIENT_DETAILS_ERROR', 500);
     }
-
-    let query = `
-      SELECT 
-        sr.service_request_id,
-        sr.description,
-        sr.priority,
-        sr.status,
-        sr.requested_date,
-        sr.scheduled_date,
-        sr.completed_date,
-        sr.actual_cost,
-        e.name as equipment_name,
-        e.type as equipment_type,
-        u_tech.name as technician_name
-      FROM service_requests sr
-      JOIN equipments e ON sr.equipment_id = e.equipment_id
-      LEFT JOIN users u_tech ON sr.provider_user_id = u_tech.user_id
-      WHERE e.company_id = $1
-      AND sr.provider_user_id IN (SELECT user_id FROM users WHERE company_id = $2)
-    `;
-
-    const queryParams = [clientId, companyId];
-    let paramIndex = 3;
-
-    if (status) {
-      query += ` AND sr.status = $${paramIndex}`;
-      queryParams.push(status);
-      paramIndex++;
-    }
-
-    query += ` ORDER BY sr.requested_date DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    queryParams.push(parseInt(limit), parseInt(offset));
-
-    const result = await db.query(query, queryParams);
-
-    const serviceHistory = result.rows.map(row => ({
-      serviceRequestId: row.service_request_id.toString(),
-      description: row.description,
-      priority: row.priority,
-      status: row.status,
-      requestedDate: row.requested_date,
-      scheduledDate: row.scheduled_date,
-      completedDate: row.completed_date,
-      cost: parseFloat(row.actual_cost) || 0,
-      equipment: {
-        name: row.equipment_name,
-        type: row.equipment_type
-      },
-      technician: row.technician_name
-    }));
-
-    return ResponseHandler.success(res, 'Historial de servicios obtenido correctamente', serviceHistory);
-
-  } catch (error) {
-    console.error('Error obteniendo historial de servicios:', error);
-    return ResponseHandler.error(res, 'Error interno del servidor', 'INTERNAL_SERVER_ERROR', 500);
   }
-};
 
-module.exports = {
-  getAssignedClients,
-  getClientDetails,
-  getClientServiceHistory
-};
+  // GET /api/provider/clients/:id/service-history - Historial de servicios del cliente
+  async getClientServiceHistory(req, res) {
+    try {
+      const { providerCompanyId } = req.user;
+      const { id } = req.params;
+      const { page = 1, limit = 20, status, startDate, endDate } = req.query;
+      const offset = (page - 1) * limit;
+
+      let whereClause = `WHERE sr.client_company_id = $1 AND sr.provider_company_id = $2`;
+      let queryParams = [id, providerCompanyId];
+      let paramCount = 2;
+
+      if (status) {
+        whereClause += ` AND sr.status = $${++paramCount}`;
+        queryParams.push(status);
+      }
+
+      if (startDate) {
+        whereClause += ` AND sr.created_at >= $${++paramCount}`;
+        queryParams.push(startDate);
+      }
+
+      if (endDate) {
+        whereClause += ` AND sr.created_at <= $${++paramCount}`;
+        queryParams.push(endDate);
+      }
+
+      const query = `
+        SELECT 
+          sr.*,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          u.first_name || ' ' || u.last_name as assigned_technician,
+          el.name as location_name
+        FROM service_requests sr
+        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
+        LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
+        ${whereClause}
+        ORDER BY sr.created_at DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+
+      queryParams.push(limit, offset);
+
+      const result = await db.query(query, queryParams);
+
+      // Count total
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM service_requests sr
+        ${whereClause}
+      `;
+
+      const countResult = await db.query(countQuery, queryParams.slice(0, -2));
+      const totalRecords = parseInt(countResult.rows[0].total);
+
+      const serviceHistory = result.rows.map(sr => ({
+        requestId: sr.service_request_id.toString(),
+        type: sr.request_type,
+        priority: sr.priority,
+        status: sr.status,
+        description: sr.description,
+        equipmentName: sr.equipment_name,
+        equipmentType: sr.equipment_type,
+        assignedTechnician: sr.assigned_technician,
+        locationName: sr.location_name,
+        createdAt: sr.created_at,
+        scheduledDate: sr.scheduled_date,
+        completedAt: sr.completed_at,
+        cost: sr.cost ? parseFloat(sr.cost) : null,
+        notes: sr.notes
+      }));
+
+      return ResponseHandler.success(res, {
+        serviceHistory,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalRecords,
+          totalPages: Math.ceil(totalRecords / limit)
+        }
+      }, 'Historial de servicios obtenido exitosamente');
+
+    } catch (error) {
+      console.error('Error en getClientServiceHistory:', error);
+      return ResponseHandler.error(res, 'Error al obtener historial de servicios', 'GET_SERVICE_HISTORY_ERROR', 500);
+    }
+  }
+
+  // POST /api/provider/clients/:id/notes - Agregar nota sobre el cliente
+  async addClientNote(req, res) {
+    try {
+      const { providerCompanyId, userId } = req.user;
+      const { id } = req.params;
+      const { note, type = 'GENERAL' } = req.body;
+
+      // Verificar relación comercial
+      const relationCheck = await db.query(`
+        SELECT COUNT(*) as count 
+        FROM active_rentals 
+        WHERE client_company_id = $1 AND provider_company_id = $2
+      `, [id, providerCompanyId]);
+
+      if (parseInt(relationCheck.rows[0].count) === 0) {
+        return ResponseHandler.error(res, 'Cliente no encontrado o sin relación comercial', 'CLIENT_NOT_FOUND', 404);
+      }
+
+      const insertQuery = `
+        INSERT INTO client_notes (
+          client_company_id, provider_company_id, created_by_user_id,
+          note, note_type
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+
+      const result = await db.query(insertQuery, [id, providerCompanyId, userId, note, type]);
+
+      return ResponseHandler.success(res, {
+        note: result.rows[0]
+      }, 'Nota agregada exitosamente');
+
+    } catch (error) {
+      console.error('Error en addClientNote:', error);
+      return ResponseHandler.error(res, 'Error al agregar nota', 'ADD_NOTE_ERROR', 500);
+    }
+  }
+}
+
+module.exports = new ClientsController();

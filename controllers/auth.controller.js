@@ -29,9 +29,9 @@ const login = async (req, res) => {
 
     // Buscar usuario por username
     const userQuery = `
-      SELECT user_id as id, name, username, password, email, phone, role, company_id
+      SELECT user_id as id, name, username, password, email, phone, role, company_id, is_active
       FROM users 
-      WHERE username = $1
+      WHERE username = $1 AND is_active = true
     `;
     
     const result = await db.query(userQuery, [username]);
@@ -42,17 +42,11 @@ const login = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Verificar password con bcrypt (considerando que usas crypt en la DB)
+    // Verificar password con bcrypt
     const isValidPassword = await bcrypt.compare(password, user.password);
     
     if (!isValidPassword) {
-      // Si bcrypt falla, intentar con la función crypt de PostgreSQL
-      const cryptQuery = 'SELECT crypt($1, $2) = $2 as is_valid';
-      const cryptResult = await db.query(cryptQuery, [password, user.password]);
-      
-      if (!cryptResult.rows[0].is_valid) {
-        return responseHandler.unauthorized(res, 'Credenciales inválidas', 'INVALID_CREDENTIALS');
-      }
+      return responseHandler.unauthorized(res, 'Credenciales inválidas', 'INVALID_CREDENTIALS');
     }
 
     // Generar token
@@ -114,15 +108,28 @@ const register = async (req, res) => {
     let company_id = null;
     let newCompany = null;
 
-    // Si es PROVEEDOR, crear la empresa primero
-    if (role === 'PROVEEDOR') {
+    // Crear empresa para todos los usuarios (CLIENT y PROVIDER)
+    if (role === 'PROVIDER') {
+      // Para PROVIDER: usar datos completos de la empresa
       const companyInsertQuery = `
-        INSERT INTO companies (name, address, phone, email, business_type)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO companies (name, address, phone, email, business_type, type)
+        VALUES ($1, $2, $3, $4, $5, 'PROVIDER')
         RETURNING company_id, name
       `;
       
       const companyValues = [company_name, company_address, company_phone, company_email, business_type];
+      const companyResult = await client.query(companyInsertQuery, companyValues);
+      newCompany = companyResult.rows[0];
+      company_id = newCompany.company_id;
+    } else if (role === 'CLIENT') {
+      // Para CLIENT: crear empresa personal con datos básicos
+      const companyInsertQuery = `
+        INSERT INTO companies (name, phone, email, type, description)
+        VALUES ($1, $2, $3, 'CLIENT', 'Empresa personal de cliente')
+        RETURNING company_id, name
+      `;
+      
+      const companyValues = [`${name} - Cliente`, phone, email];
       const companyResult = await client.query(companyInsertQuery, companyValues);
       newCompany = companyResult.rows[0];
       company_id = newCompany.company_id;
@@ -151,12 +158,12 @@ const register = async (req, res) => {
       user: newUser
     };
 
-    // Si es proveedor, incluir datos de la empresa
-    if (role === 'PROVEEDOR' && newCompany) {
+    // Incluir datos de la empresa para ambos roles
+    if (newCompany) {
       responseData.company = newCompany;
     }
 
-    const mensajeAviso = role === 'CLIENTE' ? 
+    const mensajeAviso = role === 'CLIENT' ? 
       'Cliente registrado exitosamente' : 
       'Empresa proveedora registrada exitosamente';
 
@@ -174,7 +181,7 @@ const register = async (req, res) => {
 // Obtener perfil del usuario actual
 const getProfile = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.userId;
 
     const userQuery = `
       SELECT u.user_id, u.name, u.username, u.email, u.phone, u.role, u.company_id,
