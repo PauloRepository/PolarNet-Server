@@ -34,8 +34,11 @@ router.delete('/company/locations/:id', companyController.deleteLocation);
 
 // Client management routes
 router.get('/clients', clientsController.getClients);
+router.get('/clients/opportunities', clientsController.getClientOpportunities);
 router.get('/clients/:id', clientsController.getClientDetails);
 router.get('/clients/:id/service-history', clientsController.getClientServiceHistory);
+router.get('/clients/:id/analytics', clientsController.getClientAnalytics);
+router.get('/clients/:id/contracts', clientsController.getClientContracts);
 router.post('/clients/:id/notes', clientsController.addClientNote);
 
 // Equipment management routes

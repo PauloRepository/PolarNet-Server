@@ -13,9 +13,9 @@ class DashboardController {
           COUNT(DISTINCT ar.client_company_id) as total_clients,
           COUNT(DISTINCT ar.rental_id) as active_rentals,
           COUNT(DISTINCT e.equipment_id) as total_equipments,
-          COUNT(DISTINCT CASE WHEN sr.status IN ('PENDING', 'IN_PROGRESS') THEN sr.service_request_id END) as pending_services,
+          COUNT(DISTINCT CASE WHEN sr.status IN ('OPEN', 'IN_PROGRESS') THEN sr.service_request_id END) as pending_services,
           SUM(ar.monthly_rate) as monthly_revenue,
-          COUNT(DISTINCT CASE WHEN sr.priority = 'HIGH' AND sr.status IN ('PENDING', 'IN_PROGRESS') THEN sr.service_request_id END) as urgent_requests
+          COUNT(DISTINCT CASE WHEN sr.priority = 'HIGH' AND sr.status IN ('OPEN', 'IN_PROGRESS') THEN sr.service_request_id END) as urgent_requests
         FROM active_rentals ar
         LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
         LEFT JOIN service_requests sr ON ar.client_company_id = sr.client_company_id AND sr.provider_company_id = ar.provider_company_id
@@ -35,7 +35,7 @@ class DashboardController {
           m.month,
           COALESCE(SUM(i.total_amount), 0) as revenue
         FROM months m
-        LEFT JOIN invoices i ON date_trunc('month', i.created_at) = m.month 
+        LEFT JOIN invoices i ON date_trunc('month', i.issue_date) = m.month 
           AND i.provider_company_id = $1 AND i.status = 'PAID'
         GROUP BY m.month
         ORDER BY m.month
@@ -64,7 +64,7 @@ class DashboardController {
           COUNT(*) as count
         FROM service_requests
         WHERE provider_company_id = $1 
-          AND created_at >= CURRENT_DATE - interval '30 days'
+          AND request_date >= CURRENT_DATE - interval '30 days'
         GROUP BY status
       `;
 
@@ -79,7 +79,7 @@ class DashboardController {
         FROM companies c
         INNER JOIN invoices i ON c.company_id = i.client_company_id
         WHERE i.provider_company_id = $1 
-          AND i.created_at >= CURRENT_DATE - interval '12 months'
+          AND i.issue_date >= CURRENT_DATE - interval '12 months'
         GROUP BY c.company_id, c.name
         ORDER BY total_billed DESC
         LIMIT 5
@@ -132,14 +132,14 @@ class DashboardController {
           SELECT 
             'service_request' as type,
             sr.service_request_id::text as entity_id,
-            'Nueva solicitud de servicio: ' || sr.request_type as description,
+            'Nueva solicitud de servicio: ' || sr.issue_type as description,
             c.name as client_name,
-            sr.created_at as activity_date,
+            sr.request_date as activity_date,
             sr.priority
           FROM service_requests sr
           JOIN companies c ON sr.client_company_id = c.company_id
           WHERE sr.provider_company_id = $1
-            AND sr.created_at >= CURRENT_DATE - interval '7 days'
+            AND sr.request_date >= CURRENT_DATE - interval '7 days'
         )
         UNION ALL
         (
@@ -163,12 +163,12 @@ class DashboardController {
             i.invoice_id::text as entity_id,
             'Factura generada por $' || i.total_amount::text as description,
             c.name as client_name,
-            i.created_at as activity_date,
+            i.issue_date as activity_date,
             CASE WHEN i.status = 'OVERDUE' THEN 'HIGH' ELSE 'LOW' END as priority
           FROM invoices i
           JOIN companies c ON i.client_company_id = c.company_id
           WHERE i.provider_company_id = $1
-            AND i.created_at >= CURRENT_DATE - interval '7 days'
+            AND i.issue_date >= CURRENT_DATE - interval '7 days'
         )
         ORDER BY activity_date DESC
         LIMIT $2
@@ -201,62 +201,64 @@ class DashboardController {
       const { providerCompanyId } = req.user;
 
       const alertsQuery = `
-        (
-          SELECT 
-            'overdue_invoice' as type,
-            'HIGH' as priority,
-            'Factura vencida: ' || c.name || ' - $' || i.total_amount as message,
-            i.due_date as alert_date,
-            i.invoice_id::text as entity_id
-          FROM invoices i
-          JOIN companies c ON i.client_company_id = c.company_id
-          WHERE i.provider_company_id = $1 
-            AND i.status = 'OVERDUE'
-        )
-        UNION ALL
-        (
-          SELECT 
-            'urgent_service' as type,
-            'HIGH' as priority,
-            'Servicio urgente pendiente: ' || c.name || ' - ' || sr.request_type as message,
-            sr.created_at as alert_date,
-            sr.service_request_id::text as entity_id
-          FROM service_requests sr
-          JOIN companies c ON sr.client_company_id = c.company_id
-          WHERE sr.provider_company_id = $1 
-            AND sr.priority = 'HIGH' 
-            AND sr.status = 'PENDING'
-        )
-        UNION ALL
-        (
-          SELECT 
-            'equipment_issue' as type,
-            'MEDIUM' as priority,
-            'Equipo con problemas: ' || e.name || ' - ' || c.name as message,
-            NOW() as alert_date,
-            e.equipment_id::text as entity_id
-          FROM equipments e
-          JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
-          JOIN companies c ON ar.client_company_id = c.company_id
-          WHERE ar.provider_company_id = $1 
-            AND e.status = 'MALFUNCTIONING'
-        )
-        UNION ALL
-        (
-          SELECT 
-            'maintenance_due' as type,
-            'MEDIUM' as priority,
-            'Mantenimiento próximo: ' || e.name || ' - ' || c.name as message,
-            m.scheduled_date as alert_date,
-            m.maintenance_id::text as entity_id
-          FROM maintenances m
-          JOIN equipments e ON m.equipment_id = e.equipment_id
-          JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
-          JOIN companies c ON ar.client_company_id = c.company_id
-          WHERE ar.provider_company_id = $1 
-            AND m.status = 'SCHEDULED'
-            AND m.scheduled_date <= CURRENT_DATE + interval '7 days'
-        )
+        SELECT * FROM (
+          (
+            SELECT 
+              'overdue_invoice' as type,
+              'HIGH' as priority,
+              'Factura vencida: ' || c.name || ' - $' || i.total_amount as message,
+              i.due_date as alert_date,
+              i.invoice_id::text as entity_id
+            FROM invoices i
+            JOIN companies c ON i.client_company_id = c.company_id
+            WHERE i.provider_company_id = $1 
+              AND i.status = 'OVERDUE'
+          )
+          UNION ALL
+          (
+            SELECT 
+              'urgent_service' as type,
+              'HIGH' as priority,
+              'Servicio urgente pendiente: ' || c.name || ' - ' || sr.issue_type as message,
+              sr.request_date as alert_date,
+              sr.service_request_id::text as entity_id
+            FROM service_requests sr
+            JOIN companies c ON sr.client_company_id = c.company_id
+            WHERE sr.provider_company_id = $1 
+              AND sr.priority = 'HIGH' 
+              AND sr.status = 'OPEN'
+          )
+          UNION ALL
+          (
+            SELECT 
+              'equipment_issue' as type,
+              'MEDIUM' as priority,
+              'Equipo con problemas: ' || e.name || ' - ' || c.name as message,
+              NOW() as alert_date,
+              e.equipment_id::text as entity_id
+            FROM equipments e
+            JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+            JOIN companies c ON ar.client_company_id = c.company_id
+            WHERE ar.provider_company_id = $1 
+              AND e.status = 'MALFUNCTIONING'
+          )
+          UNION ALL
+          (
+            SELECT 
+              'maintenance_due' as type,
+              'MEDIUM' as priority,
+              'Mantenimiento próximo: ' || e.name || ' - ' || c.name as message,
+              m.scheduled_date as alert_date,
+              m.maintenance_id::text as entity_id
+            FROM maintenances m
+            JOIN equipments e ON m.equipment_id = e.equipment_id
+            JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+            JOIN companies c ON ar.client_company_id = c.company_id
+            WHERE ar.provider_company_id = $1 
+              AND m.status = 'SCHEDULED'
+              AND m.scheduled_date <= CURRENT_DATE + interval '7 days'
+          )
+        ) alerts_subquery
         ORDER BY 
           CASE priority 
             WHEN 'HIGH' THEN 1 
@@ -298,8 +300,8 @@ class DashboardController {
           COUNT(DISTINCT sr.service_request_id) as total_services,
           COUNT(DISTINCT CASE WHEN sr.status = 'COMPLETED' THEN sr.service_request_id END) as completed_services,
           AVG(CASE 
-            WHEN sr.status = 'COMPLETED' AND sr.completed_at IS NOT NULL 
-            THEN EXTRACT(epoch FROM (sr.completed_at - sr.created_at))/3600 
+            WHEN sr.status = 'COMPLETED' AND sr.completion_date IS NOT NULL 
+            THEN EXTRACT(epoch FROM (sr.completion_date - sr.request_date))/3600 
           END) as avg_response_hours,
           COUNT(DISTINCT CASE WHEN sr.priority = 'HIGH' THEN sr.service_request_id END) as urgent_services,
           AVG(CASE 
@@ -311,7 +313,7 @@ class DashboardController {
         FROM service_requests sr
         FULL OUTER JOIN active_rentals ar ON sr.provider_company_id = ar.provider_company_id
         WHERE (sr.provider_company_id = $1 OR ar.provider_company_id = $1)
-          AND (sr.created_at >= CURRENT_DATE - interval '${period} days' OR ar.status = 'ACTIVE')
+          AND (sr.request_date >= CURRENT_DATE - interval '${period} days' OR ar.status = 'ACTIVE')
       `;
 
       const result = await db.query(performanceQuery, [providerCompanyId]);
