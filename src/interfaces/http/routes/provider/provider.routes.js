@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-// Import new controllers
+// Import provider controllers (using existing DDD structure)
 const dashboardController = require('../../controllers/provider/dashboard.controller');
 const companyController = require('../../controllers/provider/company.controller');
 const clientsController = require('../../controllers/provider/clients.controller');

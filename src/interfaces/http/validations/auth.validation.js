@@ -4,75 +4,96 @@ const { body } = require('express-validator');
 const authValidations = {
   // Validaciones para login
   login: [
-    body('username')
+    body('email')
       .notEmpty()
-      .withMessage('El nombre de usuario es requerido')
-      .isLength({ min: 3, max: 50 })
-      .withMessage('El nombre de usuario debe tener entre 3 y 50 caracteres'),
+      .withMessage('El email es requerido')
+      .isEmail()
+      .withMessage('Debe ser un email válido')
+      .normalizeEmail(),
     body('password')
       .notEmpty()
       .withMessage('La contraseña es requerida')
-      .isLength({ min: 4 })
-      .withMessage('La contraseña debe tener al menos 4 caracteres')
+      .isLength({ min: 6 })
+      .withMessage('La contraseña debe tener al menos 6 caracteres')
   ],
 
-  // Validaciones para registro unificado (cliente o proveedor)
+  // Validaciones para registro de usuario
   register: [
     body('name')
       .notEmpty()
       .withMessage('El nombre es requerido')
       .isLength({ min: 2, max: 100 })
-      .withMessage('El nombre debe tener entre 2 y 100 caracteres'),
-    body('username')
-      .notEmpty()
-      .withMessage('El nombre de usuario es requerido')
-      .isLength({ min: 3, max: 50 })
-      .withMessage('El nombre de usuario debe tener entre 3 y 50 caracteres')
-      .matches(/^[a-zA-Z0-9_]+$/)
-      .withMessage('El nombre de usuario solo puede contener letras, números y guiones bajos'),
-    body('password')
-      .isLength({ min: 4 })
-      .withMessage('La contraseña debe tener al menos 4 caracteres'),
+      .withMessage('El nombre debe tener entre 2 y 100 caracteres')
+      .trim(),
     body('email')
+      .notEmpty()
+      .withMessage('El email es requerido')
       .isEmail()
       .withMessage('Debe ser un email válido')
       .normalizeEmail(),
+    body('password')
+      .notEmpty()
+      .withMessage('La contraseña es requerida')
+      .isLength({ min: 6 })
+      .withMessage('La contraseña debe tener al menos 6 caracteres'),
     body('phone')
       .optional()
-      .isMobilePhone('any')
-      .withMessage('Debe ser un número de teléfono válido'),
+      .isMobilePhone('es-PE')
+      .withMessage('Debe ser un teléfono válido'),
     body('role')
-      .isIn(['CLIENTE', 'PROVEEDOR'])
-      .withMessage('El rol debe ser CLIENTE o PROVEEDOR'),
-    
-    // Validaciones condicionales para empresa (solo si role es PROVEEDOR)
-    body('company_name')
-      .if(body('role').equals('PROVEEDOR'))
       .notEmpty()
-      .withMessage('El nombre de la empresa es requerido para proveedores')
+      .withMessage('El rol es requerido')
+      .isIn(['CLIENT', 'PROVIDER'])
+      .withMessage('El rol debe ser CLIENT o PROVIDER'),
+    body('company_name')
+      .notEmpty()
+      .withMessage('El nombre de la empresa es requerido')
       .isLength({ min: 2, max: 100 })
       .withMessage('El nombre de empresa debe tener entre 2 y 100 caracteres'),
-    body('company_address')
-      .if(body('role').equals('PROVEEDOR'))
+    body('company_tax_id')
+      .notEmpty()
+      .withMessage('El RUC/Tax ID es requerido')
+      .isLength({ min: 8, max: 15 })
+      .withMessage('El RUC debe tener entre 8 y 15 caracteres')
+  ],
+
+  // Validaciones para cambio de contraseña
+  changePassword: [
+    body('current_password')
+      .notEmpty()
+      .withMessage('La contraseña actual es requerida'),
+    body('new_password')
+      .notEmpty()
+      .withMessage('La nueva contraseña es requerida')
+      .isLength({ min: 6 })
+      .withMessage('La nueva contraseña debe tener al menos 6 caracteres'),
+    body('confirm_password')
+      .notEmpty()
+      .withMessage('La confirmación de contraseña es requerida')
+      .custom((value, { req }) => {
+        if (value !== req.body.new_password) {
+          throw new Error('Las contraseñas no coinciden');
+        }
+        return true;
+      })
+  ],
+
+  // Validaciones para actualizar perfil
+  updateProfile: [
+    body('name')
       .optional()
-      .isLength({ max: 200 })
-      .withMessage('La dirección no debe exceder 200 caracteres'),
-    body('company_phone')
-      .if(body('role').equals('PROVEEDOR'))
+      .isLength({ min: 2, max: 100 })
+      .withMessage('El nombre debe tener entre 2 y 100 caracteres')
+      .trim(),
+    body('phone')
       .optional()
-      .isMobilePhone('any')
-      .withMessage('Debe ser un número de teléfono válido'),
-    body('company_email')
-      .if(body('role').equals('PROVEEDOR'))
+      .isMobilePhone('es-PE')
+      .withMessage('Debe ser un teléfono válido'),
+    body('email')
       .optional()
       .isEmail()
       .withMessage('Debe ser un email válido')
-      .normalizeEmail(),
-    body('business_type')
-      .if(body('role').equals('PROVEEDOR'))
-      .optional()
-      .isLength({ max: 50 })
-      .withMessage('El tipo de negocio no debe exceder 50 caracteres')
+      .normalizeEmail()
   ]
 };
 

@@ -1,8 +1,10 @@
 const jwt = require('jsonwebtoken');
-const db = require('../../../infrastructure/database/index');
 const ResponseHandler = require('../../../shared/helpers/responseHandler');
 
-// Middleware principal de autenticación
+// Import DI Container singleton
+const container = require('../../../infrastructure/config/DIContainer');
+
+// Middleware principal de autenticación usando DDD
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -14,44 +16,29 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      // Get validate token use case from DI Container
+      const validateTokenUseCase = container.get('validateTokenUseCase');
       
-      // Obtener datos del usuario y empresa
-      const userQuery = `
-        SELECT 
-          u.*,
-          c.company_id,
-          c.name as company_name
-        FROM users u
-        LEFT JOIN companies c ON u.company_id = c.company_id
-        WHERE u.user_id = $1 AND u.is_active = true
-      `;
-
-      const result = await db.query(userQuery, [decoded.userId]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.error(res, 'Usuario no encontrado o inactivo', 'USER_NOT_FOUND', 401);
-      }
-
-      const user = result.rows[0];
-
+      // Validate token and get user info using DDD
+      const tokenData = await validateTokenUseCase.execute(token);
+      
       // Agregar datos del usuario al request
       req.user = {
-        userId: user.user_id,
-        email: user.email,
-        name: user.name,
-        username: user.username,
-        role: user.role,
-        companyId: user.company_id,
-        companyName: user.company_name,
-        // Para backward compatibility con los controladores CLIENT
-        clientCompanyId: user.role === 'CLIENT' ? user.company_id : null,
-        providerCompanyId: user.role === 'PROVIDER' ? user.company_id : null
+        userId: tokenData.user.userId,
+        email: tokenData.user.email,
+        name: tokenData.user.name,
+        username: tokenData.user.username,
+        role: tokenData.user.role,
+        companyId: tokenData.company?.companyId || null,
+        companyName: tokenData.company?.name || null,
+        // Para backward compatibility con los controladores CLIENT/PROVIDER
+        clientCompanyId: tokenData.user.role === 'CLIENT' ? tokenData.company?.companyId : null,
+        providerCompanyId: tokenData.user.role === 'PROVIDER' ? tokenData.company?.companyId : null
       };
 
       next();
     } catch (jwtError) {
-      return ResponseHandler.error(res, 'Token inválido', 'INVALID_TOKEN', 401);
+      return ResponseHandler.error(res, 'Token inválido o expirado', 'INVALID_TOKEN', 401);
     }
 
   } catch (error) {

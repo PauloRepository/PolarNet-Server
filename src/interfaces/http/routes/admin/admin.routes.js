@@ -1,15 +1,18 @@
 /**
  * Admin Routes - DDD Architecture
- * Rutas de administración usando los nuevos controllers DDD
+ * Rutas de administración usando DIContainer
  */
 const express = require('express');
 const router = express.Router();
 
-// Import admin controller
-const adminController = require('../../controllers/admin/admin.controller');
+// Import DI Container singleton
+const container = require('../../../../infrastructure/config/DIContainer');
 
 // Validation middleware
 const { authenticate, validateAdmin } = require('../../middlewares/auth.middleware');
+
+// Get admin controller from DI Container
+const adminController = container.get('adminController');
 
 // Apply authentication and admin validation to all routes
 router.use(authenticate);

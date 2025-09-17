@@ -14,8 +14,14 @@ const PostgreSQLCompanyRepository = require('../persistence/PostgreSQLCompanyRep
 
 // Domain Services
 const EquipmentDomainService = require('../../domain/services/EquipmentDomainService');
+const AuthDomainService = require('../../domain/services/AuthDomainService');
 
-// Application Use Cases
+// Application Use Cases - Auth
+const LoginUseCase = require('../../application/use-cases/LoginUseCase');
+const RegisterUseCase = require('../../application/use-cases/RegisterUseCase');
+const ValidateTokenUseCase = require('../../application/use-cases/ValidateTokenUseCase');
+
+// Application Use Cases - Business Logic
 const GetEquipmentUseCase = require('../../application/use-cases/GetEquipmentUseCase');
 const CreateRentalUseCase = require('../../application/use-cases/CreateRentalUseCase');
 const GetProviderDashboardUseCase = require('../../application/use-cases/GetProviderDashboardUseCase');
@@ -26,14 +32,25 @@ const ScheduleMaintenanceUseCase = require('../../application/use-cases/Schedule
 const GetMaintenancesUseCase = require('../../application/use-cases/GetMaintenancesUseCase');
 const ManageUsersUseCase = require('../../application/use-cases/ManageUsersUseCase');
 
-// Interface Controllers
-const EquipmentController = require('../../interfaces/http/controllers/EquipmentController');
-const ProviderDashboardController = require('../../interfaces/http/controllers/ProviderDashboardController');
-const ServiceRequestsController = require('../../interfaces/http/controllers/ServiceRequestsController');
-const MaintenancesController = require('../../interfaces/http/controllers/MaintenancesController');
-const ClientsController = require('../../interfaces/http/controllers/ClientsController');
-const RentalsController = require('../../interfaces/http/controllers/RentalsController');
-const ProfileController = require('../../interfaces/http/controllers/ProfileController');
+// Interface Controllers - Organized by Role
+// Auth Controllers
+const AuthController = require('../../interfaces/http/controllers/auth/auth.controller');
+
+// DDD Controllers using existing interface controllers
+const ClientDashboardController = require('../../interfaces/http/controllers/client/dashboard.controller');
+const ClientEquipmentsController = require('../../interfaces/http/controllers/client/equipments.controller');
+const ClientServiceRequestsController = require('../../interfaces/http/controllers/client/serviceRequests.controller');
+const ClientProfileController = require('../../interfaces/http/controllers/client/profile.controller');
+
+const ProviderDashboardController = require('../../interfaces/http/controllers/provider/dashboard.controller');
+const ProviderClientsController = require('../../interfaces/http/controllers/provider/clients.controller');
+const ProviderEquipmentsController = require('../../interfaces/http/controllers/provider/equipments.controller');
+const ProviderServiceRequestsController = require('../../interfaces/http/controllers/provider/serviceRequests.controller');
+const ProviderMaintenancesController = require('../../interfaces/http/controllers/provider/maintenances.controller');
+const ProviderRentalsController = require('../../interfaces/http/controllers/provider/rentals.controller');
+const ProviderProfileController = require('../../interfaces/http/controllers/provider/profile.controller');
+
+const AdminController = require('../../interfaces/http/controllers/admin/admin.controller');
 
 class DIContainer {
   constructor() {
@@ -75,6 +92,10 @@ class DIContainer {
     // === DOMAIN LAYER ===
     
     // Domain Services
+    this.register('authDomainService', () => 
+      new AuthDomainService()
+    );
+
     this.register('equipmentDomainService', () => 
       new EquipmentDomainService(
         this.get('equipmentRepository'),
@@ -84,7 +105,30 @@ class DIContainer {
 
     // === APPLICATION LAYER ===
     
-    // Use Cases
+    // Auth Use Cases
+    this.register('loginUseCase', () => 
+      new LoginUseCase(
+        this.get('userRepository'),
+        this.get('authDomainService')
+      )
+    );
+
+    this.register('registerUseCase', () => 
+      new RegisterUseCase(
+        this.get('userRepository'),
+        this.get('companyRepository'),
+        this.get('authDomainService')
+      )
+    );
+
+    this.register('validateTokenUseCase', () => 
+      new ValidateTokenUseCase(
+        this.get('userRepository'),
+        this.get('authDomainService')
+      )
+    );
+
+    // Business Use Cases
     this.register('getEquipmentUseCase', () => 
       new GetEquipmentUseCase(
         this.get('equipmentRepository'),
@@ -159,62 +203,60 @@ class DIContainer {
 
     // === INTERFACE LAYER ===
     
-    // HTTP Controllers
-    this.register('equipmentController', () => 
-      new EquipmentController(
-        this.get('getEquipmentUseCase'),
-        null, // createEquipmentUseCase - TODO: implementar
-        null  // updateEquipmentUseCase - TODO: implementar
-      )
+    // Auth Controllers
+    this.register('authController', () => 
+      AuthController  // Exported as object with methods
+    );
+
+    // Client Controllers
+    this.register('clientDashboardController', () => 
+      ClientDashboardController  // Exported as instance
+    );
+
+    this.register('clientEquipmentsController', () => 
+      ClientEquipmentsController  // Exported as instance
+    );
+
+    this.register('clientServiceRequestsController', () => 
+      ClientServiceRequestsController  // Exported as instance
+    );
+
+    this.register('clientProfileController', () => 
+      ClientProfileController  // Exported as instance
+    );
+
+    // Provider Controllers
+    this.register('providerClientsController', () => 
+      ProviderClientsController  // Exported as instance
     );
 
     this.register('providerDashboardController', () => 
-      new ProviderDashboardController(
-        this.get('getProviderDashboardUseCase'),
-        null, // getRecentActivitiesUseCase - TODO: implementar
-        null, // getAlertsUseCase - TODO: implementar
-        null  // getPerformanceMetricsUseCase - TODO: implementar
-      )
+      ProviderDashboardController  // Exported as instance
     );
 
-    this.register('serviceRequestsController', () => 
-      new ServiceRequestsController(
-        this.get('createServiceRequestUseCase'),
-        this.get('getServiceRequestsUseCase'),
-        this.get('updateServiceRequestUseCase')
-      )
+    this.register('providerEquipmentsController', () => 
+      ProviderEquipmentsController  // Exported as instance
     );
 
-    this.register('maintenancesController', () => 
-      new MaintenancesController(
-        this.get('scheduleMaintenanceUseCase'),
-        this.get('getMaintenancesUseCase')
-      )
+    this.register('providerMaintenancesController', () => 
+      ProviderMaintenancesController  // Exported as instance
     );
 
-    this.register('clientsController', () => 
-      new ClientsController(
-        this.get('companyRepository'),
-        this.get('serviceRequestRepository'),
-        this.get('rentalRepository'),
-        this.get('userRepository')
-      )
+    this.register('providerProfileController', () => 
+      ProviderProfileController  // Exported as instance
     );
 
-    this.register('rentalsController', () => 
-      new RentalsController(
-        this.get('createRentalUseCase'),
-        this.get('rentalRepository'),
-        this.get('equipmentRepository'),
-        this.get('companyRepository')
-      )
+    this.register('providerRentalsController', () => 
+      ProviderRentalsController  // Exported as instance
     );
 
-    this.register('profileController', () => 
-      new ProfileController(
-        this.get('userRepository'),
-        this.get('companyRepository')
-      )
+    this.register('providerServiceRequestsController', () => 
+      ProviderServiceRequestsController  // Exported as instance
+    );
+
+    // Admin Controllers
+    this.register('adminController', () => 
+      AdminController  // Este controller se exporta como objeto, no constructor
     );
   }
 
