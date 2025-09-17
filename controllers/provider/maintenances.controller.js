@@ -38,7 +38,7 @@ class MaintenancesController {
       }
 
       if (type) {
-        whereClause += ` AND m.maintenance_type = $${++paramCount}`;
+        whereClause += ` AND m.type = $${++paramCount}`;
         queryParams.push(type);
       }
 
@@ -60,7 +60,7 @@ class MaintenancesController {
           e.model as equipment_model,
           el.name as location_name,
           el.address as location_address,
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           u.phone as technician_phone,
           ar.client_company_id,
           c.name as client_name
@@ -92,10 +92,10 @@ class MaintenancesController {
 
       const maintenances = result.rows.map(maintenance => ({
         maintenanceId: maintenance.maintenance_id.toString(),
-        type: maintenance.maintenance_type,
+        type: maintenance.type,
         status: maintenance.status,
         scheduledDate: maintenance.scheduled_date,
-        completedDate: maintenance.completed_date,
+        completedDate: maintenance.actual_end_time,
         description: maintenance.description,
         equipment: {
           equipmentId: maintenance.equipment_id.toString(),
@@ -116,8 +116,8 @@ class MaintenancesController {
           companyId: maintenance.client_company_id.toString(),
           name: maintenance.client_name
         } : null,
-        cost: maintenance.cost ? parseFloat(maintenance.cost) : null,
-        notes: maintenance.notes,
+        cost: maintenance.actual_cost ? parseFloat(maintenance.actual_cost) : null,
+        notes: maintenance.work_performed,
         createdAt: maintenance.created_at
       }));
 
@@ -154,7 +154,7 @@ class MaintenancesController {
           el.address as location_address,
           el.contact_person as location_contact,
           el.contact_phone as location_phone,
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           u.phone as technician_phone,
           u.email as technician_email,
           ar.client_company_id,
@@ -181,10 +181,10 @@ class MaintenancesController {
       return ResponseHandler.success(res, {
         maintenance: {
           maintenanceId: maintenance.maintenance_id.toString(),
-          type: maintenance.maintenance_type,
+          type: maintenance.type,
           status: maintenance.status,
           scheduledDate: maintenance.scheduled_date,
-          completedDate: maintenance.completed_date,
+          completedDate: maintenance.actual_end_time,
           description: maintenance.description,
           equipment: {
             equipmentId: maintenance.equipment_id.toString(),
@@ -211,8 +211,8 @@ class MaintenancesController {
             phone: maintenance.client_phone,
             email: maintenance.client_email
           } : null,
-          cost: maintenance.cost ? parseFloat(maintenance.cost) : null,
-          notes: maintenance.notes,
+          cost: maintenance.actual_cost ? parseFloat(maintenance.actual_cost) : null,
+          notes: maintenance.work_performed,
           createdAt: maintenance.created_at,
           updatedAt: maintenance.updated_at
         }
@@ -262,8 +262,8 @@ class MaintenancesController {
 
       const insertQuery = `
         INSERT INTO maintenances (
-          equipment_id, maintenance_type, scheduled_date, description,
-          technician_id, cost, notes, status
+          equipment_id, type, scheduled_date, description,
+          technician_id, estimated_cost, work_performed, status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'SCHEDULED')
         RETURNING *
       `;
@@ -327,14 +327,14 @@ class MaintenancesController {
 
       const updateQuery = `
         UPDATE maintenances SET
-          maintenance_type = COALESCE($1, maintenance_type),
+          type = COALESCE($1, type),
           scheduled_date = COALESCE($2, scheduled_date),
           description = COALESCE($3, description),
           technician_id = COALESCE($4, technician_id),
           status = COALESCE($5, status),
-          cost = COALESCE($6, cost),
-          notes = COALESCE($7, notes),
-          completed_date = COALESCE($8, completed_date),
+          actual_cost = COALESCE($6, actual_cost),
+          work_performed = COALESCE($7, work_performed),
+          actual_end_time = COALESCE($8, actual_end_time),
           updated_at = NOW()
         WHERE maintenance_id = $9
         RETURNING *
@@ -348,6 +348,8 @@ class MaintenancesController {
       const result = await db.query(updateQuery, values);
 
       // Si se marca como completado, actualizar fecha de último mantenimiento del equipo
+      // Comentado porque la columna last_maintenance_date no existe en equipments
+      /*
       if (status === 'COMPLETED') {
         await db.query(`
           UPDATE equipments SET 
@@ -357,6 +359,7 @@ class MaintenancesController {
           )
         `, [completedDate, id]);
       }
+      */
 
       return ResponseHandler.success(res, {
         maintenance: result.rows[0]
@@ -431,7 +434,7 @@ class MaintenancesController {
           e.type as equipment_type,
           el.name as location_name,
           el.address as location_address,
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           c.name as client_name
         FROM maintenances m
         INNER JOIN equipments e ON m.equipment_id = e.equipment_id
@@ -445,11 +448,23 @@ class MaintenancesController {
 
       const result = await db.query(query, queryParams);
 
+      // Helper function para colores del calendario
+      const getStatusColor = (status) => {
+        const colors = {
+          'SCHEDULED': '#007bff',
+          'IN_PROGRESS': '#ffc107',
+          'COMPLETED': '#28a745',
+          'CANCELLED': '#dc3545',
+          'DELAYED': '#fd7e14'
+        };
+        return colors[status] || '#6c757d';
+      };
+
       const events = result.rows.map(maintenance => ({
         id: maintenance.maintenance_id.toString(),
-        title: `${maintenance.maintenance_type} - ${maintenance.equipment_name}`,
+        title: `${maintenance.type} - ${maintenance.equipment_name}`,
         start: maintenance.scheduled_date,
-        end: maintenance.completed_date || maintenance.scheduled_date,
+        end: maintenance.actual_end_time || maintenance.scheduled_date,
         status: maintenance.status,
         equipment: {
           equipmentId: maintenance.equipment_id.toString(),
@@ -463,8 +478,8 @@ class MaintenancesController {
         technician: maintenance.technician_name,
         client: maintenance.client_name,
         description: maintenance.description,
-        backgroundColor: this.getStatusColor(maintenance.status),
-        borderColor: this.getStatusColor(maintenance.status)
+        backgroundColor: getStatusColor(maintenance.status),
+        borderColor: getStatusColor(maintenance.status)
       }));
 
       return ResponseHandler.success(res, {
@@ -477,16 +492,190 @@ class MaintenancesController {
     }
   }
 
-  // Helper method para colores del calendario
-  getStatusColor(status) {
-    const colors = {
-      'SCHEDULED': '#007bff',
-      'IN_PROGRESS': '#ffc107',
-      'COMPLETED': '#28a745',
-      'CANCELLED': '#dc3545',
-      'DELAYED': '#fd7e14'
-    };
-    return colors[status] || '#6c757d';
+  // GET /api/provider/maintenances/kpis - Obtener KPIs de mantenimiento
+  async getMaintenanceKPIs(req, res) {
+    try {
+      const { providerCompanyId } = req.user;
+      const { period = '30' } = req.query; // días por defecto
+
+      // KPI 1: Resumen general de mantenimientos
+      const summaryQuery = `
+        SELECT 
+          COUNT(*) as total_maintenances,
+          COUNT(CASE WHEN m.status = 'COMPLETED' THEN 1 END) as completed,
+          COUNT(CASE WHEN m.status = 'SCHEDULED' THEN 1 END) as scheduled,
+          COUNT(CASE WHEN m.status = 'IN_PROGRESS' THEN 1 END) as in_progress,
+          COUNT(CASE WHEN m.status = 'CANCELLED' THEN 1 END) as cancelled,
+          COUNT(CASE WHEN m.scheduled_date < CURRENT_DATE AND m.status != 'COMPLETED' THEN 1 END) as overdue
+        FROM maintenances m
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
+        WHERE e.owner_company_id = $1 
+          AND m.created_at >= CURRENT_DATE - INTERVAL '${period} days'
+      `;
+
+      // KPI 2: Costos totales y promedio
+      const costsQuery = `
+        SELECT 
+          COALESCE(SUM(actual_cost), 0) as total_cost,
+          COALESCE(AVG(actual_cost), 0) as avg_cost,
+          COALESCE(SUM(parts_cost), 0) as total_parts_cost,
+          COALESCE(SUM(labor_cost), 0) as total_labor_cost
+        FROM maintenances m
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
+        WHERE e.owner_company_id = $1 
+          AND m.status = 'COMPLETED'
+          AND m.created_at >= CURRENT_DATE - INTERVAL '${period} days'
+      `;
+
+      // KPI 3: Equipos con más mantenimientos
+      const equipmentStatsQuery = `
+        SELECT 
+          e.equipment_id,
+          e.name as equipment_name,
+          e.type as equipment_type,
+          COUNT(m.maintenance_id) as maintenance_count,
+          COUNT(CASE WHEN m.status = 'COMPLETED' THEN 1 END) as completed_count,
+          COALESCE(SUM(m.actual_cost), 0) as total_cost
+        FROM equipments e
+        LEFT JOIN maintenances m ON e.equipment_id = m.equipment_id 
+          AND m.created_at >= CURRENT_DATE - INTERVAL '${period} days'
+        WHERE e.owner_company_id = $1
+        GROUP BY e.equipment_id, e.name, e.type
+        HAVING COUNT(m.maintenance_id) > 0
+        ORDER BY maintenance_count DESC
+        LIMIT 10
+      `;
+
+      // KPI 4: Rendimiento por técnico
+      const technicianStatsQuery = `
+        SELECT 
+          u.user_id,
+          u.name as technician_name,
+          COUNT(m.maintenance_id) as assigned_count,
+          COUNT(CASE WHEN m.status = 'COMPLETED' THEN 1 END) as completed_count,
+          COALESCE(AVG(
+            EXTRACT(EPOCH FROM (m.actual_end_time - m.actual_start_time)) / 3600
+          ), 0) as avg_completion_hours,
+          COALESCE(AVG(m.actual_cost), 0) as avg_cost
+        FROM users u
+        LEFT JOIN maintenances m ON u.user_id = m.technician_id 
+          AND m.created_at >= CURRENT_DATE - INTERVAL '${period} days'
+        WHERE u.company_id = $1 AND u.role = 'PROVIDER'
+        GROUP BY u.user_id, u.name
+        HAVING COUNT(m.maintenance_id) > 0
+        ORDER BY completed_count DESC
+        LIMIT 10
+      `;
+
+      // KPI 5: Tipos de mantenimiento más frecuentes
+      const typeStatsQuery = `
+        SELECT 
+          m.type,
+          COUNT(*) as count,
+          COUNT(CASE WHEN m.status = 'COMPLETED' THEN 1 END) as completed_count,
+          COALESCE(AVG(m.actual_cost), 0) as avg_cost
+        FROM maintenances m
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
+        WHERE e.owner_company_id = $1 
+          AND m.created_at >= CURRENT_DATE - INTERVAL '${period} days'
+        GROUP BY m.type
+        ORDER BY count DESC
+      `;
+
+      // KPI 6: Tendencia mensual (últimos 6 meses)
+      const trendQuery = `
+        SELECT 
+          DATE_TRUNC('month', m.created_at) as month,
+          COUNT(*) as total_maintenances,
+          COUNT(CASE WHEN m.status = 'COMPLETED' THEN 1 END) as completed,
+          COALESCE(SUM(m.actual_cost), 0) as total_cost
+        FROM maintenances m
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
+        WHERE e.owner_company_id = $1 
+          AND m.created_at >= CURRENT_DATE - INTERVAL '6 months'
+        GROUP BY DATE_TRUNC('month', m.created_at)
+        ORDER BY month DESC
+      `;
+
+      // Ejecutar todas las consultas
+      const [
+        summaryResult,
+        costsResult,
+        equipmentStatsResult,
+        technicianStatsResult,
+        typeStatsResult,
+        trendResult
+      ] = await Promise.all([
+        db.query(summaryQuery, [providerCompanyId]),
+        db.query(costsQuery, [providerCompanyId]),
+        db.query(equipmentStatsQuery, [providerCompanyId]),
+        db.query(technicianStatsQuery, [providerCompanyId]),
+        db.query(typeStatsQuery, [providerCompanyId]),
+        db.query(trendQuery, [providerCompanyId])
+      ]);
+
+      const summary = summaryResult.rows[0];
+      const costs = costsResult.rows[0];
+
+      // Calcular eficiencia general
+      const efficiency = summary.total_maintenances > 0 
+        ? Math.round((summary.completed / summary.total_maintenances) * 100) 
+        : 0;
+
+      return ResponseHandler.success(res, {
+        period: `${period} días`,
+        summary: {
+          totalMaintenances: parseInt(summary.total_maintenances),
+          completed: parseInt(summary.completed),
+          scheduled: parseInt(summary.scheduled),
+          inProgress: parseInt(summary.in_progress),
+          cancelled: parseInt(summary.cancelled),
+          overdue: parseInt(summary.overdue),
+          efficiency: efficiency
+        },
+        costs: {
+          totalCost: parseFloat(costs.total_cost),
+          averageCost: parseFloat(costs.avg_cost),
+          totalPartsCost: parseFloat(costs.total_parts_cost),
+          totalLaborCost: parseFloat(costs.total_labor_cost)
+        },
+        topEquipments: equipmentStatsResult.rows.map(eq => ({
+          equipmentId: eq.equipment_id.toString(),
+          name: eq.equipment_name,
+          type: eq.equipment_type,
+          maintenanceCount: parseInt(eq.maintenance_count),
+          completedCount: parseInt(eq.completed_count),
+          totalCost: parseFloat(eq.total_cost)
+        })),
+        technicianPerformance: technicianStatsResult.rows.map(tech => ({
+          technicianId: tech.user_id.toString(),
+          name: tech.technician_name,
+          assignedCount: parseInt(tech.assigned_count),
+          completedCount: parseInt(tech.completed_count),
+          avgCompletionHours: parseFloat(tech.avg_completion_hours),
+          avgCost: parseFloat(tech.avg_cost),
+          efficiency: tech.assigned_count > 0 
+            ? Math.round((tech.completed_count / tech.assigned_count) * 100) 
+            : 0
+        })),
+        maintenanceTypes: typeStatsResult.rows.map(type => ({
+          type: type.type,
+          count: parseInt(type.count),
+          completedCount: parseInt(type.completed_count),
+          avgCost: parseFloat(type.avg_cost)
+        })),
+        monthlyTrend: trendResult.rows.map(trend => ({
+          month: trend.month,
+          totalMaintenances: parseInt(trend.total_maintenances),
+          completed: parseInt(trend.completed),
+          totalCost: parseFloat(trend.total_cost)
+        }))
+      }, 'KPIs de mantenimiento obtenidos exitosamente');
+
+    } catch (error) {
+      console.error('Error en getMaintenanceKPIs:', error);
+      return ResponseHandler.error(res, 'Error al obtener KPIs de mantenimiento', 'GET_MAINTENANCE_KPIS_ERROR', 500);
+    }
   }
 }
 

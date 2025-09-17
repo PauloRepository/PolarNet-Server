@@ -92,13 +92,13 @@ class EquipmentsController {
         name: equipment.name,
         type: equipment.type,
         model: equipment.model,
-        brand: equipment.brand,
+        brand: equipment.manufacturer,
         serialNumber: equipment.serial_number,
         status: equipment.status,
-        specifications: equipment.specifications,
-        dailyRate: equipment.daily_rate ? parseFloat(equipment.daily_rate) : null,
-        monthlyRate: equipment.monthly_rate ? parseFloat(equipment.monthly_rate) : null,
-        depositAmount: equipment.deposit_amount ? parseFloat(equipment.deposit_amount) : null,
+        specifications: equipment.technical_specs,
+        dailyRate: equipment.rental_price_daily ? parseFloat(equipment.rental_price_daily) : null,
+        monthlyRate: equipment.rental_price_monthly ? parseFloat(equipment.rental_price_monthly) : null,
+        depositAmount: null, // This column doesn't exist in equipments table
         location: {
           locationId: equipment.current_location_id?.toString(),
           name: equipment.location_name,
@@ -185,11 +185,11 @@ class EquipmentsController {
       const serviceHistoryQuery = `
         SELECT 
           sr.*,
-          u.first_name || ' ' || u.last_name as technician_name
+          u.name as technician_name
         FROM service_requests sr
-        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
         WHERE sr.equipment_id = $1
-        ORDER BY sr.created_at DESC
+        ORDER BY sr.request_date DESC
         LIMIT 10
       `;
 
@@ -199,7 +199,7 @@ class EquipmentsController {
       const maintenanceHistoryQuery = `
         SELECT 
           m.*,
-          u.first_name || ' ' || u.last_name as technician_name
+          u.name as technician_name
         FROM maintenances m
         LEFT JOIN users u ON m.technician_id = u.user_id
         WHERE m.equipment_id = $1
@@ -215,7 +215,7 @@ class EquipmentsController {
           tr.*
         FROM temperature_readings tr
         WHERE tr.equipment_id = $1
-        ORDER BY tr.reading_date DESC
+        ORDER BY tr.timestamp DESC
         LIMIT 20
       `;
 
@@ -227,16 +227,16 @@ class EquipmentsController {
           name: equipment.name,
           type: equipment.type,
           model: equipment.model,
-          brand: equipment.brand,
+          brand: equipment.manufacturer,
           serialNumber: equipment.serial_number,
           status: equipment.status,
-          specifications: equipment.specifications,
-          dailyRate: equipment.daily_rate ? parseFloat(equipment.daily_rate) : null,
-          monthlyRate: equipment.monthly_rate ? parseFloat(equipment.monthly_rate) : null,
-          depositAmount: equipment.deposit_amount ? parseFloat(equipment.deposit_amount) : null,
-          purchaseDate: equipment.purchase_date,
+          specifications: equipment.technical_specs,
+          dailyRate: equipment.rental_price_daily ? parseFloat(equipment.rental_price_daily) : null,
+          monthlyRate: equipment.rental_price_monthly ? parseFloat(equipment.rental_price_monthly) : null,
+          depositAmount: null, // This column doesn't exist
+          purchaseDate: null, // This column doesn't exist
           warrantyExpiry: equipment.warranty_expiry,
-          lastMaintenanceDate: equipment.last_maintenance_date,
+          lastMaintenanceDate: null, // This column doesn't exist
           createdAt: equipment.created_at,
           updatedAt: equipment.updated_at
         },
@@ -259,30 +259,30 @@ class EquipmentsController {
         } : null,
         serviceHistory: serviceHistoryResult.rows.map(sr => ({
           requestId: sr.service_request_id.toString(),
-          type: sr.request_type,
+          type: sr.issue_type,
           priority: sr.priority,
           status: sr.status,
           description: sr.description,
           technicianName: sr.technician_name,
-          createdAt: sr.created_at,
-          completedAt: sr.completed_at,
-          cost: sr.cost ? parseFloat(sr.cost) : null
+          createdAt: sr.request_date,
+          completedAt: sr.completion_date,
+          cost: sr.final_cost ? parseFloat(sr.final_cost) : null
         })),
         maintenanceHistory: maintenanceHistoryResult.rows.map(m => ({
           maintenanceId: m.maintenance_id.toString(),
-          type: m.maintenance_type,
+          type: m.type,
           status: m.status,
           scheduledDate: m.scheduled_date,
-          completedDate: m.completed_date,
+          completedDate: m.actual_end_time,
           technicianName: m.technician_name,
           description: m.description,
-          cost: m.cost ? parseFloat(m.cost) : null
+          cost: m.actual_cost ? parseFloat(m.actual_cost) : null
         })),
         recentReadings: readingsResult.rows.map(reading => ({
-          readingId: reading.reading_id.toString(),
-          temperature: parseFloat(reading.temperature),
-          humidity: reading.humidity ? parseFloat(reading.humidity) : null,
-          readingDate: reading.reading_date,
+          readingId: reading.temperature_reading_id.toString(),
+          temperature: parseFloat(reading.value),
+          humidity: null, // This column doesn't exist in temperature_readings
+          readingDate: reading.timestamp,
           status: reading.status
         }))
       }, 'Detalles del equipo obtenidos exitosamente');
@@ -299,8 +299,7 @@ class EquipmentsController {
       const { providerCompanyId } = req.user;
       const {
         name, type, model, brand, serialNumber, specifications,
-        dailyRate, monthlyRate, depositAmount, currentLocationId,
-        purchaseDate, warrantyExpiry
+        dailyRate, monthlyRate, currentLocationId, warrantyExpiry
       } = req.body;
 
       // Verificar que el serial number no exista
@@ -327,17 +326,17 @@ class EquipmentsController {
 
       const insertQuery = `
         INSERT INTO equipments (
-          name, type, model, brand, serial_number, specifications,
-          daily_rate, monthly_rate, deposit_amount, current_location_id,
-          purchase_date, warranty_expiry, owner_company_id, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'AVAILABLE')
+          name, type, model, manufacturer, serial_number, technical_specs,
+          rental_price_daily, rental_price_monthly, current_location_id,
+          warranty_expiry, owner_company_id, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'AVAILABLE')
         RETURNING *
       `;
 
       const values = [
         name, type, model, brand, serialNumber, specifications,
-        dailyRate, monthlyRate, depositAmount, currentLocationId,
-        purchaseDate, warrantyExpiry, providerCompanyId
+        dailyRate, monthlyRate, currentLocationId,
+        warrantyExpiry, providerCompanyId
       ];
 
       const result = await db.query(insertQuery, values);
@@ -387,17 +386,17 @@ class EquipmentsController {
 
       const updateQuery = `
         UPDATE equipments SET
-          name = $1, type = $2, model = $3, brand = $4, specifications = $5,
-          daily_rate = $6, monthly_rate = $7, deposit_amount = $8,
-          current_location_id = $9, status = $10, warranty_expiry = $11,
+          name = $1, type = $2, model = $3, manufacturer = $4, technical_specs = $5,
+          rental_price_daily = $6, rental_price_monthly = $7,
+          current_location_id = $8, status = $9, warranty_expiry = $10,
           updated_at = NOW()
-        WHERE equipment_id = $12 AND owner_company_id = $13
+        WHERE equipment_id = $11 AND owner_company_id = $12
         RETURNING *
       `;
 
       const values = [
         name, type, model, brand, specifications,
-        dailyRate, monthlyRate, depositAmount, currentLocationId,
+        dailyRate, monthlyRate, currentLocationId,
         status, warrantyExpiry, id, providerCompanyId
       ];
 
@@ -473,12 +472,12 @@ class EquipmentsController {
       let paramCount = 1;
 
       if (startDate) {
-        whereClause += ` AND reading_date >= $${++paramCount}`;
+        whereClause += ` AND timestamp >= $${++paramCount}`;
         queryParams.push(startDate);
       }
 
       if (endDate) {
-        whereClause += ` AND reading_date <= $${++paramCount}`;
+        whereClause += ` AND timestamp <= $${++paramCount}`;
         queryParams.push(endDate);
       }
 
@@ -486,7 +485,7 @@ class EquipmentsController {
         SELECT *
         FROM temperature_readings
         ${whereClause}
-        ORDER BY reading_date DESC
+        ORDER BY timestamp DESC
         LIMIT $${++paramCount}
       `;
 
@@ -495,21 +494,21 @@ class EquipmentsController {
       const result = await db.query(query, queryParams);
 
       const readings = result.rows.map(reading => ({
-        readingId: reading.reading_id.toString(),
-        temperature: parseFloat(reading.temperature),
-        humidity: reading.humidity ? parseFloat(reading.humidity) : null,
-        readingDate: reading.reading_date,
+        readingId: reading.temperature_reading_id.toString(),
+        temperature: parseFloat(reading.value),
+        humidity: null, // This column doesn't exist
+        readingDate: reading.timestamp,
         status: reading.status,
-        notes: reading.notes
+        notes: null // This column doesn't exist
       }));
 
       // Estadísticas de las lecturas
       const statsQuery = `
         SELECT 
           COUNT(*) as total_readings,
-          AVG(temperature) as avg_temperature,
-          MIN(temperature) as min_temperature,
-          MAX(temperature) as max_temperature,
+          AVG(value) as avg_temperature,
+          MIN(value) as min_temperature,
+          MAX(value) as max_temperature,
           COUNT(CASE WHEN status = 'ALERT' THEN 1 END) as alert_count
         FROM temperature_readings
         ${whereClause}

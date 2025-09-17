@@ -44,17 +44,17 @@ class ServiceRequestsController {
       }
 
       if (technicianId) {
-        whereClause += ` AND sr.assigned_technician_id = $${++paramCount}`;
+        whereClause += ` AND sr.technician_id = $${++paramCount}`;
         queryParams.push(technicianId);
       }
 
       if (startDate) {
-        whereClause += ` AND sr.created_at >= $${++paramCount}`;
+        whereClause += ` AND sr.request_date >= $${++paramCount}`;
         queryParams.push(startDate);
       }
 
       if (endDate) {
-        whereClause += ` AND sr.created_at <= $${++paramCount}`;
+        whereClause += ` AND sr.request_date <= $${++paramCount}`;
         queryParams.push(endDate);
       }
 
@@ -68,21 +68,22 @@ class ServiceRequestsController {
           e.model as equipment_model,
           el.name as location_name,
           el.address as location_address,
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           u.phone as technician_phone
         FROM service_requests sr
         LEFT JOIN companies c ON sr.client_company_id = c.company_id
         LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
         LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
-        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
         ${whereClause}
         ORDER BY 
           CASE sr.priority 
-            WHEN 'HIGH' THEN 1 
-            WHEN 'MEDIUM' THEN 2 
-            ELSE 3 
+            WHEN 'CRITICAL' THEN 1
+            WHEN 'HIGH' THEN 2 
+            WHEN 'MEDIUM' THEN 3 
+            ELSE 4 
           END,
-          sr.created_at DESC
+          sr.request_date DESC
         LIMIT $${++paramCount} OFFSET $${++paramCount}
       `;
 
@@ -102,7 +103,7 @@ class ServiceRequestsController {
 
       const serviceRequests = result.rows.map(sr => ({
         requestId: sr.service_request_id.toString(),
-        type: sr.request_type,
+        type: sr.issue_type,
         priority: sr.priority,
         status: sr.status,
         description: sr.description,
@@ -121,16 +122,16 @@ class ServiceRequestsController {
           name: sr.location_name,
           address: sr.location_address
         },
-        technician: sr.assigned_technician_id ? {
-          userId: sr.assigned_technician_id.toString(),
+        technician: sr.technician_id ? {
+          userId: sr.technician_id.toString(),
           name: sr.technician_name,
           phone: sr.technician_phone
         } : null,
-        createdAt: sr.created_at,
+        createdAt: sr.request_date,
         scheduledDate: sr.scheduled_date,
-        completedAt: sr.completed_at,
-        cost: sr.cost ? parseFloat(sr.cost) : null,
-        notes: sr.notes
+        completedAt: sr.completion_date,
+        cost: sr.final_cost ? parseFloat(sr.final_cost) : null,
+        notes: sr.internal_notes
       }));
 
       return ResponseHandler.success(res, {
@@ -170,14 +171,14 @@ class ServiceRequestsController {
           el.address as location_address,
           el.contact_person as location_contact,
           el.contact_phone as location_phone,
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           u.phone as technician_phone,
           u.email as technician_email
         FROM service_requests sr
         LEFT JOIN companies c ON sr.client_company_id = c.company_id
         LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
         LEFT JOIN equipment_locations el ON e.current_location_id = el.equipment_location_id
-        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
         WHERE sr.service_request_id = $1 AND sr.provider_company_id = $2
       `;
 
@@ -192,7 +193,7 @@ class ServiceRequestsController {
       return ResponseHandler.success(res, {
         serviceRequest: {
           requestId: sr.service_request_id.toString(),
-          type: sr.request_type,
+          type: sr.issue_type,
           priority: sr.priority,
           status: sr.status,
           description: sr.description,
@@ -216,17 +217,17 @@ class ServiceRequestsController {
             contactPerson: sr.location_contact,
             contactPhone: sr.location_phone
           },
-          technician: sr.assigned_technician_id ? {
-            userId: sr.assigned_technician_id.toString(),
+          technician: sr.technician_id ? {
+            userId: sr.technician_id.toString(),
             name: sr.technician_name,
             phone: sr.technician_phone,
             email: sr.technician_email
           } : null,
-          createdAt: sr.created_at,
+          createdAt: sr.request_date,
           scheduledDate: sr.scheduled_date,
-          completedAt: sr.completed_at,
-          cost: sr.cost ? parseFloat(sr.cost) : null,
-          notes: sr.notes,
+          completedAt: sr.completion_date,
+          cost: sr.final_cost ? parseFloat(sr.final_cost) : null,
+          notes: sr.internal_notes,
           clientRating: sr.client_rating,
           clientFeedback: sr.client_feedback
         }
@@ -257,10 +258,10 @@ class ServiceRequestsController {
 
       const updateQuery = `
         UPDATE service_requests SET
-          assigned_technician_id = $1,
+          technician_id = $1,
           scheduled_date = $2,
-          status = CASE WHEN status = 'PENDING' THEN 'ASSIGNED' ELSE status END,
-          notes = COALESCE(notes || E'\\n\\n', '') || $3,
+          status = CASE WHEN status = 'OPEN' THEN 'ASSIGNED' ELSE status END,
+          internal_notes = COALESCE(internal_notes || E'\\n\\n', '') || $3,
           updated_at = NOW()
         WHERE service_request_id = $4 AND provider_company_id = $5
         RETURNING *
@@ -295,7 +296,7 @@ class ServiceRequestsController {
       const { id } = req.params;
       const { status, notes } = req.body;
 
-      const validStatuses = ['PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
+      const validStatuses = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'CLOSED'];
       if (!validStatuses.includes(status)) {
         return ResponseHandler.error(res, 'Estado no válido', 'INVALID_STATUS', 400);
       }
@@ -303,7 +304,7 @@ class ServiceRequestsController {
       const updateQuery = `
         UPDATE service_requests SET
           status = $1,
-          notes = COALESCE(notes || E'\\n\\n', '') || $2,
+          internal_notes = COALESCE(internal_notes || E'\\n\\n', '') || $2,
           updated_at = NOW()
         WHERE service_request_id = $3 AND provider_company_id = $4
         RETURNING *
@@ -337,9 +338,9 @@ class ServiceRequestsController {
       const updateQuery = `
         UPDATE service_requests SET
           status = 'COMPLETED',
-          completed_at = NOW(),
-          cost = $1,
-          notes = COALESCE(notes || E'\\n\\n', '') || $2,
+          completion_date = NOW(),
+          final_cost = $1,
+          internal_notes = COALESCE(internal_notes || E'\\n\\n', '') || $2,
           updated_at = NOW()
         WHERE service_request_id = $3 AND provider_company_id = $4
         RETURNING *
@@ -353,13 +354,7 @@ class ServiceRequestsController {
         return ResponseHandler.error(res, 'Solicitud no encontrada', 'SERVICE_REQUEST_NOT_FOUND', 404);
       }
 
-      // Actualizar fecha de último mantenimiento del equipo si aplica
-      if (result.rows[0].equipment_id) {
-        await db.query(
-          'UPDATE equipments SET last_maintenance_date = NOW() WHERE equipment_id = $1',
-          [result.rows[0].equipment_id]
-        );
-      }
+      // Note: Removed equipment update since last_maintenance_date doesn't exist in schema
 
       return ResponseHandler.success(res, {
         serviceRequest: result.rows[0]
@@ -380,18 +375,18 @@ class ServiceRequestsController {
       const statsQuery = `
         SELECT 
           COUNT(*) as total_requests,
-          COUNT(CASE WHEN status = 'PENDING' THEN 1 END) as pending_requests,
+          COUNT(CASE WHEN status = 'OPEN' THEN 1 END) as pending_requests,
           COUNT(CASE WHEN status = 'IN_PROGRESS' THEN 1 END) as in_progress_requests,
           COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_requests,
-          COUNT(CASE WHEN priority = 'HIGH' THEN 1 END) as high_priority_requests,
+          COUNT(CASE WHEN priority IN ('HIGH', 'CRITICAL') THEN 1 END) as high_priority_requests,
           AVG(CASE 
-            WHEN status = 'COMPLETED' AND completed_at IS NOT NULL 
-            THEN EXTRACT(epoch FROM (completed_at - created_at))/3600 
+            WHEN status = 'COMPLETED' AND completion_date IS NOT NULL 
+            THEN EXTRACT(epoch FROM (completion_date - request_date))/3600 
           END) as avg_completion_hours,
-          SUM(CASE WHEN status = 'COMPLETED' THEN cost ELSE 0 END) as total_revenue
+          SUM(CASE WHEN status = 'COMPLETED' THEN final_cost ELSE 0 END) as total_revenue
         FROM service_requests
         WHERE provider_company_id = $1 
-          AND created_at >= CURRENT_DATE - interval '${period} days'
+          AND request_date >= CURRENT_DATE - interval '${period} days'
       `;
 
       const statsResult = await db.query(statsQuery, [providerCompanyId]);
@@ -400,12 +395,12 @@ class ServiceRequestsController {
       // Servicios por tipo
       const typeStatsQuery = `
         SELECT 
-          request_type,
+          issue_type,
           COUNT(*) as count
         FROM service_requests
         WHERE provider_company_id = $1 
-          AND created_at >= CURRENT_DATE - interval '${period} days'
-        GROUP BY request_type
+          AND request_date >= CURRENT_DATE - interval '${period} days'
+        GROUP BY issue_type
         ORDER BY count DESC
       `;
 
@@ -414,15 +409,15 @@ class ServiceRequestsController {
       // Técnicos más activos
       const technicianStatsQuery = `
         SELECT 
-          u.first_name || ' ' || u.last_name as technician_name,
+          u.name as technician_name,
           u.user_id,
           COUNT(sr.service_request_id) as assigned_requests,
           COUNT(CASE WHEN sr.status = 'COMPLETED' THEN 1 END) as completed_requests
         FROM users u
-        LEFT JOIN service_requests sr ON u.user_id = sr.assigned_technician_id 
-          AND sr.created_at >= CURRENT_DATE - interval '${period} days'
+        LEFT JOIN service_requests sr ON u.user_id = sr.technician_id 
+          AND sr.request_date >= CURRENT_DATE - interval '${period} days'
         WHERE u.company_id = $1 AND u.role = 'PROVIDER'
-        GROUP BY u.user_id, u.first_name, u.last_name
+        GROUP BY u.user_id, u.name
         ORDER BY completed_requests DESC
         LIMIT 5
       `;
@@ -440,7 +435,7 @@ class ServiceRequestsController {
           totalRevenue: parseFloat(stats.total_revenue) || 0
         },
         requestsByType: typeStatsResult.rows.map(row => ({
-          type: row.request_type,
+          type: row.issue_type,
           count: parseInt(row.count)
         })),
         technicianPerformance: technicianStatsResult.rows.map(row => ({

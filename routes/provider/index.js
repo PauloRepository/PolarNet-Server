@@ -52,35 +52,40 @@ router.post('/equipments/:id/move', equipmentsController.moveEquipment);
 
 // Service requests routes
 router.get('/service-requests', serviceRequestsController.getServiceRequests);
+router.get('/service-requests/stats', serviceRequestsController.getServiceStats);
 router.get('/service-requests/:id', serviceRequestsController.getServiceRequestDetails);
 router.put('/service-requests/:id/assign', serviceRequestsController.assignTechnician);
 router.put('/service-requests/:id/status', serviceRequestsController.updateStatus);
 router.put('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest);
-router.get('/service-requests/stats', serviceRequestsController.getServiceStats);
+
+// Maintenance routes
+router.get('/maintenances', maintenancesController.getMaintenances);
+router.get('/maintenances/calendar', maintenancesController.getMaintenanceCalendar);
+router.get('/maintenances/kpis', maintenancesController.getMaintenanceKPIs);
+router.post('/maintenances', maintenancesController.createMaintenance);
+router.get('/maintenances/:id', maintenancesController.getMaintenanceDetails);
+router.put('/maintenances/:id', maintenancesController.updateMaintenance);
+router.delete('/maintenances/:id', maintenancesController.deleteMaintenance);
 
 // Rental management routes  
 router.get('/rentals', rentalsController.getRentals);
+router.get('/rentals/revenue-stats', rentalsController.getRevenueStats);
+router.get('/rentals/renewals', rentalsController.getRenewals);
+router.get('/rentals/profitability', rentalsController.getProfitability);
+router.get('/rentals/requests', rentalsController.getRentalRequests);
 router.get('/rentals/:id', rentalsController.getRentalDetails);
 router.post('/rentals', rentalsController.createRental);
 router.put('/rentals/:id', rentalsController.updateRental);
 router.put('/rentals/:id/terminate', rentalsController.terminateRental);
 router.get('/rentals/:id/payments', rentalsController.getRentalPayments);
 
-// Maintenance routes
-router.get('/maintenances', maintenancesController.getMaintenances);
-router.post('/maintenances', maintenancesController.createMaintenance);
-router.get('/maintenances/:id', maintenancesController.getMaintenanceDetails);
-router.put('/maintenances/:id', maintenancesController.updateMaintenance);
-router.delete('/maintenances/:id', maintenancesController.deleteMaintenance);
-router.get('/maintenances/calendar', maintenancesController.getMaintenanceCalendar);
-
 // Invoice management routes
 router.get('/invoices', invoicesController.getInvoices);
+router.get('/invoices/stats', invoicesController.getInvoiceStats);
 router.post('/invoices', invoicesController.createInvoice);
 router.get('/invoices/:id', invoicesController.getInvoiceDetails);
 router.put('/invoices/:id', invoicesController.updateInvoice);
 router.put('/invoices/:id/send', invoicesController.sendInvoice);
-router.get('/invoices/stats', invoicesController.getInvoiceStats);
 
 // Profile management routes
 router.get('/profile', profileController.getProfile);
