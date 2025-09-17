@@ -2,7 +2,7 @@ module.exports = {
     apps: [
         {
             name: "PolarNet-Server",
-            script: "bin/www",
+            script: "src/main.js",
             watch: true,
             watch_options: {
                 "followSymlinks": false

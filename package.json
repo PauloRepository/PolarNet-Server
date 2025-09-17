@@ -1,11 +1,11 @@
 {
   "name": "polarnet-server",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "PolarNet API Server - DDD Architecture",
+  "main": "src/main.js",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js",
+    "start": "node src/main.js",
+    "dev": "nodemon src/main.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

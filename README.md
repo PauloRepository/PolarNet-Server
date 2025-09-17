@@ -1,297 +1,224 @@
-# PolarNet Server - Guía de Configuración y Uso
+# 🚀 PolarNet Server
 
-## 📋 Configuración Inicial
+**Plataforma B2B para gestión de equipos de refrigeración industrial**
 
-### 1. Configurar Base de Datos
-Edita el archivo `.env` con tus credenciales de PostgreSQL:
+> Sistema completo con arquitectura DDD para proveedores y clientes de equipos de refrigeración, incluyendo monitoreo IoT, gestión de contratos, facturación y marketplace.
 
+## 🏗️ Arquitectura
+
+**Domain-Driven Design (DDD)** con 4 capas bien definidas:
+
+```
+src/
+├── 🔹 domain/           # Lógica de negocio pura
+├── 🎯 application/      # Casos de uso y coordinación  
+├── 🔧 infrastructure/   # Implementaciones técnicas
+└── 🌐 interfaces/       # Controllers y rutas HTTP
+```
+
+## 🎯 Roles del Sistema
+
+- **👤 CLIENT**: Empresas que rentan equipos de refrigeración
+- **🏢 PROVIDER**: Empresas que proveen equipos y servicios  
+- **⚙️ ADMIN**: Administradores del sistema
+
+## 🚀 Quick Start
+
+### 1. Configuración
+```bash
+# Instalar dependencias
+npm install
+
+# Configurar variables de entorno
+cp .env.example .env
+# Editar .env con tus credenciales de PostgreSQL
+```
+
+### 2. Base de Datos
 ```env
-# Configuración de la base de datos PostgreSQL
+# .env
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=polarnet_db
 DB_USER=tu_usuario
 DB_PASSWORD=tu_password
+JWT_SECRET=tu_jwt_secret_muy_seguro
 ```
 
-### 2. Configurar JWT Secret
-Cambia el JWT_SECRET en `.env` por algo más seguro:
-```env
-JWT_SECRET=tu_jwt_secret_muy_seguro_aqui_cambialo_en_produccion
-```
-
-## 🚀 Iniciar el Servidor
-
+### 3. Iniciar Servidor
 ```bash
-# Desarrollo (con auto-reload)
+# Desarrollo
 npm run dev
 
 # Producción
 npm start
+
+# Con PM2
+npx pm2 start ecosystem.config.js
 ```
 
-## 🔐 Endpoints de Autenticación
+**Servidor corriendo en**: `http://localhost:3200`
 
-### Login
-```
+## 🔐 Autenticación
+
+```javascript
+// Login
 POST /api/auth/login
-Content-Type: application/json
-
 {
-  "username": "carlosp",
-  "password": "1234"
+  "email": "user@example.com", 
+  "password": "password123"
 }
-```
 
-**Respuesta exitosa:**
-```json
-{
-  "message": "Login exitoso",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "id": 1,
-    "name": "Carlos Pérez",
-    "username": "carlosp",
-    "email": "carlos@superlima.com",
-    "role": "EMPRESA",
-    "company_id": 1,
-    "company_name": "Supermercado Lima Norte"
-  }
-}
-```
-
-### Registro
-```
-POST /api/auth/register
-Content-Type: application/json
-
-{
-  "name": "Ana García",
-  "username": "anag",
-  "password": "1234",
-  "email": "ana@tecservices.com",
-  "phone": "987654321",
-  "role": "TECNICO"
-}
-```
-
-### Obtener Perfil
-```
-GET /api/auth/profile
-Authorization: Bearer tu_token_aqui
-```
-
-### Verificar Token
-```
-GET /api/auth/verify
-Authorization: Bearer tu_token_aqui
-```
-
-## 🔧 Endpoints de Administrador
-
-### Obtener Todos los Usuarios
-```
-POST /api/auth/admin/users
-Content-Type: application/json
-
-{
-  "admin_password": "polarnetadmin"
-}
-```
-
-### Verificar Conexión a Base de Datos
-```
-POST /api/auth/admin/db-status
-Content-Type: application/json
-
-{
-  "admin_password": "polarnetadmin"
-}
-```
-
-**Respuesta exitosa de db-status:**
-```json
+// Response
 {
   "success": true,
-  "message": "Conexión a base de datos exitosa",
-  "database_info": {
-    "server_time": "2025-09-04T...",
-    "postgres_version": "PostgreSQL 15.x...",
-    "total_users": 2,
-    "total_companies": 1,
-    "total_equipments": 1
-  },
-  "environment": {
-    "db_host": "localhost",
-    "db_name": "polarnet_db",
-    "db_user": "tu_usuario"
+  "data": {
+    "token": "jwt_token_here",
+    "user": {
+      "id": 1,
+      "email": "user@example.com", 
+      "role": "PROVIDER",
+      "companyId": 1
+    }
   }
 }
 ```
 
-## 🔧 Endpoints de Equipos
+## 📊 Endpoints Principales
 
-### Obtener Equipos
-```
-GET /api/equipments
-Authorization: Bearer tu_token_aqui
-
-# Filtros opcionales:
-GET /api/equipments?status=OK&type=Freezer
-```
-
-### Obtener Equipo Específico
-```
-GET /api/equipments/1
-Authorization: Bearer tu_token_aqui
+### 🏢 Provider Endpoints
+```http
+GET /api/provider/dashboard          # Dashboard con métricas
+GET /api/provider/equipments         # Gestión de equipos
+GET /api/provider/clients            # Gestión de clientes
+GET /api/provider/rentals            # Contratos de renta
+GET /api/provider/service-requests   # Solicitudes de servicio
+GET /api/provider/maintenances       # Mantenimientos programados
+GET /api/provider/invoices           # Facturación
 ```
 
-### Obtener Lecturas de Temperatura
-```
-GET /api/equipments/1/temperature
-Authorization: Bearer tu_token_aqui
-
-# Con filtros de fecha:
-GET /api/equipments/1/temperature?from_date=2025-09-01&to_date=2025-09-04&limit=100
-```
-
-### Obtener Lecturas de Energía
-```
-GET /api/equipments/1/energy
-Authorization: Bearer tu_token_aqui
+### 👤 Client Endpoints  
+```http
+GET /api/client/dashboard            # Dashboard del cliente
+GET /api/client/equipments           # Mis equipos rentados
+GET /api/client/service-requests     # Mis solicitudes de servicio
+GET /api/client/contracts            # Mis contratos
+GET /api/client/invoices             # Mis facturas
+GET /api/client/marketplace          # Buscar equipos disponibles
 ```
 
-## 🔧 Endpoints de Servicios
-
-### Obtener Solicitudes de Servicio
-```
-GET /api/services
-Authorization: Bearer tu_token_aqui
-
-# Filtros:
-GET /api/services?status=OPEN&priority=HIGH
+### ⚙️ Admin Endpoints
+```http
+GET /api/admin/users                 # Gestión de usuarios
+GET /api/admin/companies             # Gestión de empresas
+GET /api/admin/stats                 # Estadísticas del sistema
 ```
 
-### Crear Solicitud de Servicio (Solo Empresas)
-```
-POST /api/services
-Authorization: Bearer tu_token_empresa
-Content-Type: application/json
+## 🛡️ Seguridad
 
-{
-  "description": "El equipo no llega a la temperatura mínima",
-  "priority": "HIGH",
-  "issue_type": "COOLING",
-  "equipment_id": 1
-}
-```
+- **JWT Authentication**: Requerido para todos los endpoints
+- **Role-based Access Control**: Validación por roles
+- **Company Isolation**: Los usuarios solo acceden a datos de su empresa
+- **Input Validation**: Validación completa de todos los inputs
 
-### Asignar Técnico (Solo Técnicos)
-```
-PUT /api/services/1/assign
-Authorization: Bearer tu_token_tecnico
-```
+## 🔧 Tecnologías
 
-### Actualizar Estado
-```
-PUT /api/services/1/status
-Authorization: Bearer tu_token
-Content-Type: application/json
+- **Backend**: Node.js + Express.js
+- **Base de Datos**: PostgreSQL  
+- **Autenticación**: JWT
+- **Arquitectura**: Domain-Driven Design (DDD)
+- **Process Manager**: PM2
+- **Validación**: Joi / Express-validator
 
-{
-  "status": "COMPLETED",
-  "notes": "Problema resuelto, se cambió el termostato"
-}
+## 📁 Estructura del Proyecto
+
+```
+├── src/
+│   ├── domain/              # Entidades y lógica de negocio
+│   ├── application/         # Casos de uso
+│   ├── infrastructure/      # Conexiones BD, repositorios
+│   ├── interfaces/          # Controllers HTTP por roles
+│   └── shared/              # Helpers compartidos
+├── bin/www                  # Punto de entrada del servidor
+├── ecosystem.config.js      # Configuración PM2
+└── package.json
 ```
 
-## 🏢 Roles y Permisos
+## 📚 Documentación Completa
 
-### EMPRESA
-- Ver solo sus propios equipos
-- Crear solicitudes de servicio
-- Ver solo sus propias solicitudes
-- Actualizar estado de sus solicitudes
+- **[API_ENDPOINTS.md](./API_ENDPOINTS.md)**: Documentación completa de todos los endpoints
+- **Tests**: Ejecutar con `npm test`
+- **Logs**: Disponibles en `/logs` y con `npx pm2 logs`
 
-### TECNICO
-- Ver equipos de todas las empresas
-- Ver solicitudes asignadas o sin asignar
-- Asignarse solicitudes
-- Actualizar estado de solicitudes asignadas
+## 🚀 Deploy
 
-## 🧪 Datos de Prueba
-
-Usa estos usuarios para probar:
-
-**Empresa:**
-- Username: `carlosp`
-- Password: `1234`
-- Role: EMPRESA
-
-**Técnico:**
-- Username: `juant`
-- Password: `abcd`
-- Role: TECNICO
-
-## ⚡ Ejemplos de Uso con curl
-
-### 1. Login
+### Desarrollo
 ```bash
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"carlosp","password":"1234"}'
+npm run dev
 ```
 
-### 2. Obtener Equipos (guarda el token del login)
+### Producción con PM2
 ```bash
-curl -X GET http://localhost:3000/api/equipments \
-  -H "Authorization: Bearer TU_TOKEN_AQUI"
+npx pm2 start ecosystem.config.js
+npx pm2 save
+npx pm2 startup
 ```
 
-### 3. Crear Solicitud de Servicio
+### Monitoreo
 ```bash
-curl -X POST http://localhost:3000/api/services \
-  -H "Authorization: Bearer TU_TOKEN_EMPRESA" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "description": "Equipo presenta ruidos extraños",
-    "priority": "MEDIUM",
-    "issue_type": "MECHANICAL",
-    "equipment_id": 1
-  }'
+npx pm2 status      # Estado de procesos
+npx pm2 logs        # Ver logs
+npx pm2 monit       # Monitor en tiempo real
 ```
 
-## 🔍 Estados y Valores Permitidos
+## 🎯 Características Principales
 
-### Estados de Equipos
-- `OK`, `WARNING`, `ERROR`, `MAINTENANCE`
+### Para Providers 🏢
+- ✅ Dashboard con KPIs de negocio
+- ✅ Gestión completa de equipos (CRUD + IoT)
+- ✅ Gestión de clientes y contratos
+- ✅ Programación de mantenimientos
+- ✅ Sistema de facturación completo
+- ✅ Seguimiento de servicios técnicos
 
-### Prioridades de Servicio
-- `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`
+### Para Clients 👤  
+- ✅ Dashboard de equipos rentados
+- ✅ Monitoreo en tiempo real (temperatura, energía)
+- ✅ Solicitudes de servicio
+- ✅ Gestión de contratos y facturas
+- ✅ Marketplace para buscar equipos
+- ✅ Gestión empresarial multi-ubicación
 
-### Estados de Solicitud
-- `OPEN`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`
+### Para Admins ⚙️
+- ✅ Gestión de usuarios y empresas
+- ✅ Estadísticas globales del sistema
+- ✅ Configuración y mantenimiento
 
-### Tipos de Problema
-- `COOLING`, `HEATING`, `ELECTRICAL`, `MECHANICAL`, `OTHER`
+## 🔄 Status del Proyecto
 
-## 🛠️ Estructura del Proyecto
+**Estado**: ✅ **PRODUCCIÓN READY**
+- ✅ Arquitectura DDD completa implementada
+- ✅ Todos los endpoints de Provider funcionando
+- ✅ Endpoints de Client implementados  
+- ✅ Sistema de autenticación robusto
+- ✅ Base de datos optimizada
+- ✅ Validaciones y seguridad completas
+- ✅ Documentación actualizada
 
-```
-polarnet-server/
-├── app.js                 # Configuración principal de Express
-├── package.json           # Dependencias y scripts
-├── .env                   # Variables de entorno
-├── controllers/           # Lógica de negocio
-│   ├── authController.js
-│   ├── equipmentController.js
-│   └── serviceController.js
-├── routes/                # Definición de rutas
-│   ├── auth.js
-│   ├── equipments.js
-│   └── services.js
-├── helpers/               # Middlewares y utilidades
-│   └── auth.js
-└── lib/                   # Configuración de servicios
-    └── database.js
-```
-"# PolarNet-Server" 
+## 🤝 Contribuir
+
+1. Fork el proyecto
+2. Crear rama feature (`git checkout -b feature/nueva-caracteristica`)
+3. Commit cambios (`git commit -am 'Agregar nueva característica'`)
+4. Push a la rama (`git push origin feature/nueva-caracteristica`)
+5. Crear Pull Request
+
+## 📞 Soporte
+
+- **Email**: soporte@polarnet.com
+- **Issues**: GitHub Issues
+- **Docs**: Ver `API_ENDPOINTS.md` para documentación completa
+
+---
+
+**PolarNet Server v2.0** - Arquitectura empresarial con DDD, lista para producción 🚀 
