@@ -1,102 +1,153 @@
 /**
- * Company Entity - Aggregate Root
- * Representa una empresa en el sistema (tanto proveedores como clientes)
+ * Domain Entity: Company
+ * Represents a company in the system (CLIENT or PROVIDER)
  */
 class Company {
   constructor({
-    companyId,
+    id,
     name,
-    type, // 'PROVIDER' | 'CLIENT'
-    email,
-    phone,
+    type, // 'CLIENT' or 'PROVIDER'
     address,
-    city,
-    state,
-    country,
-    postalCode,
+    phone,
+    email,
     contactPerson,
-    website,
-    description,
-    status, // 'ACTIVE' | 'INACTIVE' | 'PENDING'
-    createdAt,
+    taxId,
+    isActive = true,
+    registrationDate,
     updatedAt
   }) {
-    this.companyId = companyId;
+    this.id = id;
     this.name = name;
     this.type = type;
-    this.email = email;
-    this.phone = phone;
     this.address = address;
-    this.city = city;
-    this.state = state;
-    this.country = country;
-    this.postalCode = postalCode;
+    this.phone = phone;
+    this.email = email;
     this.contactPerson = contactPerson;
-    this.website = website;
-    this.description = description;
-    this.status = status;
-    this.createdAt = createdAt;
-    this.updatedAt = updatedAt;
-
-    this.validate();
+    this.taxId = taxId;
+    this.isActive = isActive;
+    this.registrationDate = registrationDate || new Date();
+    this.updatedAt = updatedAt || new Date();
   }
 
+  /**
+   * Validate company data
+   * @returns {Object} Validation result
+   */
   validate() {
-    if (!this.name || this.name.trim().length === 0) {
-      throw new Error('Company name is required');
+    const errors = [];
+
+    if (!this.name || this.name.trim().length < 2) {
+      errors.push('Company name must be at least 2 characters');
     }
 
-    if (!this.type || !['PROVIDER', 'CLIENT'].includes(this.type)) {
-      throw new Error('Company type must be PROVIDER or CLIENT');
+    if (!['CLIENT', 'PROVIDER'].includes(this.type)) {
+      errors.push('Company type must be CLIENT or PROVIDER');
     }
 
     if (!this.email || !this.isValidEmail(this.email)) {
-      throw new Error('Valid email is required');
+      errors.push('Valid email is required');
     }
 
-    if (!this.status || !['ACTIVE', 'INACTIVE', 'PENDING'].includes(this.status)) {
-      throw new Error('Invalid company status');
+    if (!this.phone || this.phone.trim().length < 10) {
+      errors.push('Valid phone number is required');
     }
+
+    if (!this.contactPerson || this.contactPerson.trim().length < 2) {
+      errors.push('Contact person is required');
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
   }
 
+  /**
+   * Check if company is a client
+   * @returns {boolean}
+   */
+  isClient() {
+    return this.type === 'CLIENT';
+  }
+
+  /**
+   * Check if company is a provider
+   * @returns {boolean}
+   */
+  isProvider() {
+    return this.type === 'PROVIDER';
+  }
+
+  /**
+   * Update company information
+   * @param {Object} updateData - Data to update
+   */
+  update(updateData) {
+    const allowedFields = ['name', 'address', 'phone', 'email', 'contactPerson'];
+    
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        this[field] = updateData[field];
+      }
+    });
+
+    this.updatedAt = new Date();
+  }
+
+  /**
+   * Deactivate company
+   */
+  deactivate() {
+    this.isActive = false;
+    this.updatedAt = new Date();
+  }
+
+  /**
+   * Activate company
+   */
+  activate() {
+    this.isActive = true;
+    this.updatedAt = new Date();
+  }
+
+  /**
+   * Validate email format
+   * @param {string} email - Email to validate
+   * @returns {boolean}
+   */
   isValidEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
 
-  isProvider() {
-    return this.type === 'PROVIDER';
+  /**
+   * Get company age in days
+   * @returns {number}
+   */
+  getAgeInDays() {
+    const now = new Date();
+    const diffTime = Math.abs(now - this.registrationDate);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   }
 
-  isClient() {
-    return this.type === 'CLIENT';
-  }
-
-  isActive() {
-    return this.status === 'ACTIVE';
-  }
-
-  updateContactInfo({ email, phone, address, city, state, country, postalCode }) {
-    if (email) this.email = email;
-    if (phone) this.phone = phone;
-    if (address) this.address = address;
-    if (city) this.city = city;
-    if (state) this.state = state;
-    if (country) this.country = country;
-    if (postalCode) this.postalCode = postalCode;
-    
-    this.updatedAt = new Date();
-    this.validate();
-  }
-
-  deactivate() {
-    this.status = 'INACTIVE';
-    this.updatedAt = new Date();
-  }
-
-  activate() {
-    this.status = 'ACTIVE';
-    this.updatedAt = new Date();
+  /**
+   * Convert to plain object
+   * @returns {Object}
+   */
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      type: this.type,
+      address: this.address,
+      phone: this.phone,
+      email: this.email,
+      contactPerson: this.contactPerson,
+      taxId: this.taxId,
+      isActive: this.isActive,
+      registrationDate: this.registrationDate,
+      updatedAt: this.updatedAt
+    };
   }
 }
 

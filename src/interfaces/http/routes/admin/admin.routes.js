@@ -6,7 +6,8 @@ const express = require('express');
 const router = express.Router();
 
 // Import DI Container singleton
-const container = require('../../../../infrastructure/config/DIContainer');
+const { getContainer } = require('../../../../infrastructure/config/index');
+const container = getContainer();
 
 // Validation middleware
 const { authenticate, validateAdmin } = require('../../middlewares/auth.middleware');

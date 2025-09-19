@@ -1,10 +1,13 @@
 /**
  * Main Application Entry Point - DDD Architecture
- * Punto de entrada principal siguiendo arquitectura DDD limpia
+ * Punto de entrada principal siguiendo arquitectura DDD
  */
 const express = require('express');
 const morgan = require('morgan');
 require('dotenv').config();
+
+// Importar configuración DI Container
+const { getContainer } = require('./infrastructure/config');
 
 // Importar middlewares DDD
 const middlewares = require('./interfaces/http/middlewares');
@@ -80,8 +83,17 @@ app.use(middlewares.errorLogger);
 app.use(middlewares.globalErrorHandler);
 
 // === SERVER STARTUP ===
-const startServer = () => {
+const startServer = async () => {
   try {
+    // Initialize DI Container
+    console.log('🔧 Initializing DI Container...');
+    const container = getContainer();
+    
+    // Initialize database connection
+    console.log('🔌 Connecting to database...');
+    const database = container.resolve('database');
+    await database.connect();
+    
     app.listen(PORT, () => {
       console.log('\n🚀 ========================================');
       console.log('   PolarNet Server - DDD Architecture');
@@ -126,7 +138,10 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Solo iniciar servidor si es el archivo principal
 if (require.main === module) {
-  startServer();
+  startServer().catch(error => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  });
 }
 
 module.exports = app;

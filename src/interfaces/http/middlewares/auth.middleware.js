@@ -1,10 +1,10 @@
 const jwt = require('jsonwebtoken');
 const ResponseHandler = require('../../../shared/helpers/responseHandler');
 
-// Import DI Container singleton
-const container = require('../../../infrastructure/config/DIContainer');
+// Ensure environment variables are loaded
+require('dotenv').config();
 
-// Middleware principal de autenticación usando DDD
+// Middleware principal de autenticación usando JWT directo
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -16,28 +16,23 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-      // Get validate token use case from DI Container
-      const validateTokenUseCase = container.get('validateTokenUseCase');
-      
-      // Validate token and get user info using DDD
-      const tokenData = await validateTokenUseCase.execute(token);
+      // Validate token directly with JWT using same secret as auth controller
+      const secret = process.env.JWT_SECRET || 'tu_jwt_secret_muy_seguro_aqui_cambialo_en_produccion';
+      const decoded = jwt.verify(token, secret);
       
       // Agregar datos del usuario al request
       req.user = {
-        userId: tokenData.user.userId,
-        email: tokenData.user.email,
-        name: tokenData.user.name,
-        username: tokenData.user.username,
-        role: tokenData.user.role,
-        companyId: tokenData.company?.companyId || null,
-        companyName: tokenData.company?.name || null,
+        userId: decoded.userId,
+        role: decoded.role,
+        companyId: decoded.companyId,
         // Para backward compatibility con los controladores CLIENT/PROVIDER
-        clientCompanyId: tokenData.user.role === 'CLIENT' ? tokenData.company?.companyId : null,
-        providerCompanyId: tokenData.user.role === 'PROVIDER' ? tokenData.company?.companyId : null
+        clientCompanyId: decoded.role === 'CLIENT' ? decoded.companyId : null,
+        providerCompanyId: decoded.role === 'PROVIDER' ? decoded.companyId : null
       };
 
       next();
     } catch (jwtError) {
+      console.error('JWT Validation Error:', jwtError.message);
       return ResponseHandler.error(res, 'Token inválido o expirado', 'INVALID_TOKEN', 401);
     }
 

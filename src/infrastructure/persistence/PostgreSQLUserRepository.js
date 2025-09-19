@@ -1,22 +1,26 @@
-/**
- * PostgreSQL User Repository Implementation
- */
 const IUserRepository = require('../../domain/repositories/IUserRepository');
 const User = require('../../domain/entities/User');
+const bcrypt = require('bcrypt');
 
+/**
+ * PostgreSQL Implementation: User Repository
+ * Implements user data persistence using PostgreSQL
+ */
 class PostgreSQLUserRepository extends IUserRepository {
   constructor(database) {
     super();
     this.db = database;
   }
 
+  /**
+   * Find user by ID
+   * @param {number} userId - User ID
+   * @returns {Promise<User|null>}
+   */
   async findById(userId) {
     try {
       const query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type
+        SELECT u.*, c.name as company_name, c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
         WHERE u.user_id = $1
@@ -28,22 +32,25 @@ class PostgreSQLUserRepository extends IUserRepository {
         return null;
       }
 
-      return this.mapToEntity(result.rows[0]);
+      return this.mapRowToEntity(result.rows[0]);
     } catch (error) {
-      throw new Error(`Error finding user by ID: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.findById:', error);
+      throw new Error(`Failed to find user by ID: ${error.message}`);
     }
   }
 
+  /**
+   * Find user by email
+   * @param {string} email - User email
+   * @returns {Promise<User|null>}
+   */
   async findByEmail(email) {
     try {
       const query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type
+        SELECT u.*, c.name as company_name, c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
-        WHERE LOWER(u.email) = LOWER($1)
+        WHERE u.email = $1
       `;
       
       const result = await this.db.query(query, [email]);
@@ -52,491 +59,659 @@ class PostgreSQLUserRepository extends IUserRepository {
         return null;
       }
 
-      return this.mapToEntity(result.rows[0]);
+      return this.mapRowToEntity(result.rows[0]);
     } catch (error) {
-      throw new Error(`Error finding user by email: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.findByEmail:', error);
+      throw new Error(`Failed to find user by email: ${error.message}`);
     }
   }
 
-  async findByCompany(companyId, filters = {}) {
+  /**
+   * Find users by company ID
+   * @param {number} companyId - Company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<User[]>}
+   */
+  async findByCompanyId(companyId, filters = {}) {
     try {
       let query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type
+        SELECT u.*, c.name as company_name, c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
         WHERE u.company_id = $1
       `;
       
       const params = [companyId];
-      let paramIndex = 2;
+      let paramCount = 1;
 
-      // Aplicar filtros
       if (filters.role) {
-        if (Array.isArray(filters.role)) {
-          query += ` AND u.role = ANY($${paramIndex})`;
-          params.push(filters.role);
-        } else {
-          query += ` AND u.role = $${paramIndex}`;
-          params.push(filters.role);
-        }
-        paramIndex++;
+        paramCount++;
+        query += ` AND u.role = $${paramCount}`;
+        params.push(filters.role);
       }
 
-      if (filters.status) {
-        query += ` AND u.status = $${paramIndex}`;
-        params.push(filters.status);
-        paramIndex++;
+      if (filters.isActive !== undefined) {
+        paramCount++;
+        query += ` AND u.is_active = $${paramCount}`;
+        params.push(filters.isActive);
       }
 
-      if (filters.department) {
-        query += ` AND u.department = $${paramIndex}`;
-        params.push(filters.department);
-        paramIndex++;
+      if (filters.isAdmin !== undefined) {
+        paramCount++;
+        query += ` AND u.is_admin = $${paramCount}`;
+        params.push(filters.isAdmin);
       }
 
-      if (filters.position) {
-        query += ` AND u.position ILIKE $${paramIndex}`;
-        params.push(`%${filters.position}%`);
-        paramIndex++;
-      }
-
-      if (filters.search) {
-        query += ` AND (u.name ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex})`;
-        params.push(`%${filters.search}%`);
-        paramIndex++;
-      }
-
-      query += ` ORDER BY u.name ASC`;
+      query += ` ORDER BY u.first_name ASC, u.last_name ASC`;
 
       const result = await this.db.query(query, params);
-      return result.rows.map(row => this.mapToEntity(row));
+      return result.rows.map(row => this.mapRowToEntity(row));
     } catch (error) {
-      throw new Error(`Error finding users by company: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.findByCompanyId:', error);
+      throw new Error(`Failed to find users by company ID: ${error.message}`);
     }
   }
 
-  async findTechnicians(providerCompanyId, filters = {}) {
+  /**
+   * Find users by role
+   * @param {string} role - User role
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<User[]>}
+   */
+  async findByRole(role, filters = {}) {
     try {
       let query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          (
-            SELECT COUNT(*) 
-            FROM maintenances m 
-            WHERE m.technician_id = u.user_id 
-              AND m.status IN ('SCHEDULED', 'IN_PROGRESS')
-          ) as active_maintenances,
-          (
-            SELECT AVG(quality_rating) 
-            FROM maintenances m 
-            WHERE m.technician_id = u.user_id 
-              AND quality_rating IS NOT NULL
-          ) as avg_rating
-        FROM users u
-        LEFT JOIN companies c ON u.company_id = c.company_id
-        WHERE u.company_id = $1 
-          AND u.role = 'technician'
-          AND u.status = 'active'
-      `;
-      
-      const params = [providerCompanyId];
-      let paramIndex = 2;
-
-      if (filters.specialties) {
-        query += ` AND u.specialties && $${paramIndex}`;
-        params.push(filters.specialties);
-        paramIndex++;
-      }
-
-      if (filters.availability) {
-        if (filters.availability === 'available') {
-          query += ` AND (
-            SELECT COUNT(*) 
-            FROM maintenances m 
-            WHERE m.technician_id = u.user_id 
-              AND m.status = 'IN_PROGRESS'
-          ) = 0`;
-        }
-      }
-
-      query += ` ORDER BY u.name ASC`;
-
-      const result = await this.db.query(query, params);
-      return result.rows.map(row => {
-        const user = this.mapToEntity(row);
-        user.activeMaintenances = parseInt(row.active_maintenances) || 0;
-        user.avgRating = parseFloat(row.avg_rating) || 0;
-        return user;
-      });
-    } catch (error) {
-      throw new Error(`Error finding technicians: ${error.message}`);
-    }
-  }
-
-  async findActiveAdmins() {
-    try {
-      const query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type
-        FROM users u
-        LEFT JOIN companies c ON u.company_id = c.company_id
-        WHERE u.role = 'admin' AND u.status = 'active'
-        ORDER BY u.name ASC
-      `;
-      
-      const result = await this.db.query(query);
-      return result.rows.map(row => this.mapToEntity(row));
-    } catch (error) {
-      throw new Error(`Error finding active admins: ${error.message}`);
-    }
-  }
-
-  async findUsersByRole(role, filters = {}) {
-    try {
-      let query = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type
+        SELECT u.*, c.name as company_name, c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
         WHERE u.role = $1
       `;
       
       const params = [role];
-      let paramIndex = 2;
+      let paramCount = 1;
 
-      if (filters.status) {
-        query += ` AND u.status = $${paramIndex}`;
-        params.push(filters.status);
-        paramIndex++;
+      if (filters.companyId) {
+        paramCount++;
+        query += ` AND u.company_id = $${paramCount}`;
+        params.push(filters.companyId);
       }
 
-      if (filters.companyType) {
-        query += ` AND c.type = $${paramIndex}`;
-        params.push(filters.companyType);
-        paramIndex++;
+      if (filters.isActive !== undefined) {
+        paramCount++;
+        query += ` AND u.is_active = $${paramCount}`;
+        params.push(filters.isActive);
       }
 
-      query += ` ORDER BY u.name ASC`;
+      query += ` ORDER BY u.first_name ASC, u.last_name ASC`;
+
+      if (filters.limit) {
+        paramCount++;
+        query += ` LIMIT $${paramCount}`;
+        params.push(filters.limit);
+      }
 
       const result = await this.db.query(query, params);
-      return result.rows.map(row => this.mapToEntity(row));
+      return result.rows.map(row => this.mapRowToEntity(row));
     } catch (error) {
-      throw new Error(`Error finding users by role: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.findByRole:', error);
+      throw new Error(`Failed to find users by role: ${error.message}`);
     }
   }
 
-  async getActivityStats(userId, period) {
+  /**
+   * Create new user
+   * @param {Object} userData - User data
+   * @returns {Promise<User>}
+   */
+  async create(userData) {
     try {
-      const { startDate, endDate } = period;
-      
-      // Stats para técnicos
-      if (await this.isRole(userId, 'technician')) {
-        const maintenanceStatsQuery = `
-          SELECT 
-            COUNT(*) as total_maintenances,
-            COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_maintenances,
-            COUNT(CASE WHEN status = 'IN_PROGRESS' THEN 1 END) as in_progress_maintenances,
-            AVG(quality_rating) as avg_rating,
-            SUM(actual_cost) as total_revenue,
-            AVG(
-              CASE 
-                WHEN actual_end_time IS NOT NULL AND actual_start_time IS NOT NULL 
-                THEN EXTRACT(EPOCH FROM (actual_end_time - actual_start_time)) / 3600 
-                ELSE NULL 
-              END
-            ) as avg_duration_hours
-          FROM maintenances
-          WHERE technician_id = $1 
-            AND scheduled_date >= $2 
-            AND scheduled_date <= $3
-        `;
-
-        const result = await this.db.query(maintenanceStatsQuery, [userId, startDate, endDate]);
-        const stats = result.rows[0];
-
-        return {
-          totalMaintenances: parseInt(stats.total_maintenances) || 0,
-          completedMaintenances: parseInt(stats.completed_maintenances) || 0,
-          inProgressMaintenances: parseInt(stats.in_progress_maintenances) || 0,
-          completionRate: stats.total_maintenances > 0 ? 
-            (stats.completed_maintenances / stats.total_maintenances) * 100 : 0,
-          avgRating: parseFloat(stats.avg_rating) || 0,
-          totalRevenue: parseFloat(stats.total_revenue) || 0,
-          avgDurationHours: parseFloat(stats.avg_duration_hours) || 0
-        };
+      // Hash password if provided
+      let hashedPassword = null;
+      if (userData.password) {
+        hashedPassword = await bcrypt.hash(userData.password, 10);
       }
 
-      // Stats para clientes
-      if (await this.isRole(userId, 'client')) {
-        const user = await this.findById(userId);
-        const serviceRequestStatsQuery = `
-          SELECT 
-            COUNT(*) as total_requests,
-            COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completed_requests,
-            COUNT(CASE WHEN status = 'PENDING' THEN 1 END) as pending_requests,
-            AVG(satisfaction_rating) as avg_satisfaction,
-            SUM(estimated_cost) as total_cost
-          FROM service_requests
-          WHERE client_company_id = $1 
-            AND created_at >= $2 
-            AND created_at <= $3
-        `;
-
-        const result = await this.db.query(serviceRequestStatsQuery, [user.companyId, startDate, endDate]);
-        const stats = result.rows[0];
-
-        return {
-          totalRequests: parseInt(stats.total_requests) || 0,
-          completedRequests: parseInt(stats.completed_requests) || 0,
-          pendingRequests: parseInt(stats.pending_requests) || 0,
-          avgSatisfaction: parseFloat(stats.avg_satisfaction) || 0,
-          totalCost: parseFloat(stats.total_cost) || 0
-        };
-      }
-
-      return {};
-    } catch (error) {
-      throw new Error(`Error getting user activity stats: ${error.message}`);
-    }
-  }
-
-  async isRole(userId, role) {
-    try {
-      const query = 'SELECT role FROM users WHERE user_id = $1';
-      const result = await this.db.query(query, [userId]);
-      return result.rows.length > 0 && result.rows[0].role === role;
-    } catch (error) {
-      throw new Error(`Error checking user role: ${error.message}`);
-    }
-  }
-
-  async existsByEmail(email, excludeUserId = null) {
-    try {
-      let query = 'SELECT user_id FROM users WHERE LOWER(email) = LOWER($1)';
-      const params = [email];
-      
-      if (excludeUserId) {
-        query += ' AND user_id != $2';
-        params.push(excludeUserId);
-      }
-      
-      const result = await this.db.query(query, params);
-      return result.rows.length > 0;
-    } catch (error) {
-      throw new Error(`Error checking if email exists: ${error.message}`);
-    }
-  }
-
-  async save(user) {
-    try {
-      if (user.userId) {
-        return await this.update(user);
-      } else {
-        return await this.create(user);
-      }
-    } catch (error) {
-      throw new Error(`Error saving user: ${error.message}`);
-    }
-  }
-
-  async create(user) {
-    const query = `
-      INSERT INTO users (
-        name, email, password_hash, role, phone, position, 
-        department, company_id, profile_image, specialties, 
-        certifications, skills, experience_years, status, 
-        notification_preferences, timezone, language, 
-        two_factor_enabled, last_activity_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-      RETURNING *
-    `;
-
-    const params = [
-      user.name,
-      user.email,
-      user.passwordHash,
-      user.role,
-      user.phone,
-      user.position,
-      user.department,
-      user.companyId,
-      user.profileImage,
-      user.specialties,
-      user.certifications ? JSON.stringify(user.certifications) : null,
-      user.skills,
-      user.experienceYears,
-      user.status || 'active',
-      user.notificationPreferences ? JSON.stringify(user.notificationPreferences) : null,
-      user.timezone,
-      user.language,
-      user.twoFactorEnabled || false,
-      user.lastActivityAt
-    ];
-
-    const result = await this.db.query(query, params);
-    return this.mapToEntity(result.rows[0]);
-  }
-
-  async update(user) {
-    const query = `
-      UPDATE users SET
-        name = $2, email = $3, phone = $4, position = $5,
-        department = $6, profile_image = $7, specialties = $8,
-        certifications = $9, skills = $10, experience_years = $11,
-        status = $12, notification_preferences = $13, timezone = $14,
-        language = $15, two_factor_enabled = $16, last_activity_at = $17,
-        updated_at = $18
-      WHERE user_id = $1
-      RETURNING *
-    `;
-
-    const params = [
-      user.userId,
-      user.name,
-      user.email,
-      user.phone,
-      user.position,
-      user.department,
-      user.profileImage,
-      user.specialties,
-      user.certifications ? JSON.stringify(user.certifications) : null,
-      user.skills,
-      user.experienceYears,
-      user.status,
-      user.notificationPreferences ? JSON.stringify(user.notificationPreferences) : null,
-      user.timezone,
-      user.language,
-      user.twoFactorEnabled,
-      user.lastActivityAt,
-      new Date()
-    ];
-
-    const result = await this.db.query(query, params);
-    return this.mapToEntity(result.rows[0]);
-  }
-
-  async updatePassword(userId, newPasswordHash) {
-    try {
       const query = `
-        UPDATE users SET 
-          password_hash = $2, 
-          updated_at = $3
-        WHERE user_id = $1
+        INSERT INTO users (
+          company_id, first_name, last_name, email, password, 
+          phone, role, is_active, is_admin, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+        ) RETURNING user_id
+      `;
+      
+      const now = new Date();
+      const params = [
+        userData.companyId,
+        userData.firstName,
+        userData.lastName,
+        userData.email,
+        hashedPassword,
+        userData.phone,
+        userData.role,
+        userData.isActive !== undefined ? userData.isActive : true,
+        userData.isAdmin !== undefined ? userData.isAdmin : false,
+        userData.createdAt || now,
+        now
+      ];
+
+      const result = await this.db.query(query, params);
+      
+  // Get the created user with company info
+  return await this.findById(result.rows[0].user_id);
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.create:', error);
+      throw new Error(`Failed to create user: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update user
+   * @param {number} userId - User ID
+   * @param {Object} updateData - Update data
+   * @returns {Promise<User>}
+   */
+  async update(userId, updateData) {
+    try {
+      const allowedFields = ['first_name', 'last_name', 'email', 'phone', 'is_active', 'is_admin'];
+      const updateFields = [];
+      const params = [];
+      let paramCount = 0;
+
+      // Build dynamic update query
+      allowedFields.forEach(field => {
+        const camelField = this.snakeToCamel(field);
+        if (updateData[camelField] !== undefined) {
+          paramCount++;
+          updateFields.push(`${field} = $${paramCount}`);
+          params.push(updateData[camelField]);
+        }
+      });
+
+      if (updateFields.length === 0) {
+        throw new Error('No valid fields to update');
+      }
+
+      // Add updated_at
+      paramCount++;
+      updateFields.push(`updated_at = $${paramCount}`);
+      params.push(new Date());
+
+      // Add user ID parameter
+      paramCount++;
+      params.push(userId);
+
+      const query = `
+        UPDATE users 
+        SET ${updateFields.join(', ')}
+        WHERE user_id = $${paramCount}
         RETURNING user_id
       `;
 
-      const result = await this.db.query(query, [userId, newPasswordHash, new Date()]);
+      const result = await this.db.query(query, params);
+      
+      if (result.rows.length === 0) {
+        throw new Error('User not found');
+      }
+
+  return await this.findById(result.rows[0].user_id);
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.update:', error);
+      throw new Error(`Failed to update user: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update user password
+   * @param {number} userId - User ID
+   * @param {string} newPassword - New password
+   * @returns {Promise<boolean>}
+   */
+  async updatePassword(userId, newPassword) {
+    try {
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      
+      const query = `
+        UPDATE users 
+        SET password = $1, updated_at = $2
+        WHERE user_id = $3
+        RETURNING user_id
+      `;
+
+      const result = await this.db.query(query, [hashedPassword, new Date(), userId]);
       return result.rows.length > 0;
     } catch (error) {
-      throw new Error(`Error updating password: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.updatePassword:', error);
+      throw new Error(`Failed to update password: ${error.message}`);
     }
   }
 
-  async updateLastActivity(userId) {
+  /**
+   * Verify user password
+   * @param {number} userId - User ID
+   * @param {string} password - Password to verify
+   * @returns {Promise<boolean>}
+   */
+  async verifyPassword(userId, password) {
     try {
       const query = `
-        UPDATE users SET 
-          last_activity_at = $2
+        SELECT password FROM users 
         WHERE user_id = $1
       `;
+      
+      const result = await this.db.query(query, [userId]);
+      
+      if (result.rows.length === 0) {
+        return false;
+      }
 
-      await this.db.query(query, [userId, new Date()]);
+      const hashedPassword = result.rows[0].password;
+      if (!hashedPassword) {
+        return false;
+      }
+
+      return await bcrypt.compare(password, hashedPassword);
     } catch (error) {
-      throw new Error(`Error updating last activity: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.verifyPassword:', error);
+      throw new Error(`Failed to verify password: ${error.message}`);
     }
   }
 
-  async deactivate(userId) {
+  /**
+   * Update last login timestamp
+   * @param {number} userId - User ID
+   * @returns {Promise<boolean>}
+   */
+  async updateLastLogin(userId) {
     try {
       const query = `
-        UPDATE users SET 
-          status = 'inactive',
-          updated_at = $2
-        WHERE user_id = $1
-        RETURNING *
+        UPDATE users 
+        SET last_login = $1, updated_at = $2
+        WHERE user_id = $3
+        RETURNING user_id
       `;
 
-      const result = await this.db.query(query, [userId, new Date()]);
-      return result.rows.length > 0 ? this.mapToEntity(result.rows[0]) : null;
+      const result = await this.db.query(query, [new Date(), new Date(), userId]);
+      return result.rows.length > 0;
     } catch (error) {
-      throw new Error(`Error deactivating user: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.updateLastLogin:', error);
+      throw new Error(`Failed to update last login: ${error.message}`);
     }
   }
 
-  async count(criteria = {}) {
+  /**
+   * Delete user (soft delete)
+   * @param {number} userId - User ID
+   * @returns {Promise<boolean>}
+   */
+  async delete(userId) {
     try {
-      let query = 'SELECT COUNT(*) FROM users u';
+      const query = `
+        UPDATE users 
+        SET deleted_at = $1, is_active = false
+        WHERE user_id = $2
+        RETURNING user_id
+      `;
+
+      const result = await this.db.query(query, [new Date(), userId]);
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.delete:', error);
+      throw new Error(`Failed to delete user: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find active users
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<User[]>}
+   */
+  async findActive(filters = {}) {
+    try {
+      let query = `
+        SELECT u.*, c.name as company_name, c.type as company_type
+        FROM users u
+        LEFT JOIN companies c ON u.company_id = c.company_id
+        WHERE u.is_active = true
+      `;
+      
       const params = [];
-      const conditions = [];
-      let paramIndex = 1;
+      let paramCount = 0;
 
-      if (criteria.companyId) {
-        conditions.push(`u.company_id = $${paramIndex}`);
-        params.push(criteria.companyId);
-        paramIndex++;
+      if (filters.role) {
+        paramCount++;
+        query += ` AND u.role = $${paramCount}`;
+        params.push(filters.role);
       }
 
-      if (criteria.role) {
-        if (Array.isArray(criteria.role)) {
-          conditions.push(`u.role = ANY($${paramIndex})`);
-          params.push(criteria.role);
-        } else {
-          conditions.push(`u.role = $${paramIndex}`);
-          params.push(criteria.role);
-        }
-        paramIndex++;
+      if (filters.companyId) {
+        paramCount++;
+        query += ` AND u.company_id = $${paramCount}`;
+        params.push(filters.companyId);
       }
 
-      if (criteria.status) {
-        conditions.push(`u.status = $${paramIndex}`);
-        params.push(criteria.status);
-        paramIndex++;
+      query += ` ORDER BY u.first_name ASC, u.last_name ASC`;
+
+      if (filters.limit) {
+        paramCount++;
+        query += ` LIMIT $${paramCount}`;
+        params.push(filters.limit);
       }
 
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
+      const result = await this.db.query(query, params);
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.findActive:', error);
+      throw new Error(`Failed to find active users: ${error.message}`);
+    }
+  }
+
+  /**
+   * Search users
+   * @param {string} query - Search query
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<User[]>}
+   */
+  async search(query, filters = {}) {
+    try {
+      let sqlQuery = `
+        SELECT u.*, c.name as company_name, c.type as company_type
+        FROM users u
+        LEFT JOIN companies c ON u.company_id = c.company_id
+        
+        AND (
+          u.first_name ILIKE $1 OR 
+          u.last_name ILIKE $1 OR 
+          u.email ILIKE $1 OR
+          CONCAT(u.first_name, ' ', u.last_name) ILIKE $1
+        )
+      `;
+      
+      const params = [`%${query}%`];
+      let paramCount = 1;
+
+      if (filters.role) {
+        paramCount++;
+        sqlQuery += ` AND u.role = $${paramCount}`;
+        params.push(filters.role);
+      }
+
+      if (filters.companyId) {
+        paramCount++;
+        sqlQuery += ` AND u.company_id = $${paramCount}`;
+        params.push(filters.companyId);
+      }
+
+      if (filters.isActive !== undefined) {
+        paramCount++;
+        sqlQuery += ` AND u.is_active = $${paramCount}`;
+        params.push(filters.isActive);
+      }
+
+      sqlQuery += ` ORDER BY u.first_name ASC, u.last_name ASC`;
+
+      if (filters.limit) {
+        paramCount++;
+        sqlQuery += ` LIMIT $${paramCount}`;
+        params.push(filters.limit);
+      }
+
+      const result = await this.db.query(sqlQuery, params);
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.search:', error);
+      throw new Error(`Failed to search users: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check if email exists
+   * @param {string} email - Email to check
+   * @param {number} excludeUserId - User ID to exclude from check
+   * @returns {Promise<boolean>}
+   */
+  async emailExists(email, excludeUserId = null) {
+    try {
+      let query = `
+        SELECT COUNT(*) as count 
+        FROM users 
+        WHERE email = $1
+      `;
+      
+      const params = [email];
+
+      if (excludeUserId) {
+        query += ` AND id != $2`;
+        params.push(excludeUserId);
+      }
+
+      const result = await this.db.query(query, params);
+      return parseInt(result.rows[0].count) > 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.emailExists:', error);
+      throw new Error(`Failed to check email existence: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get user activity summary
+   * @param {number} userId - User ID
+   * @returns {Promise<Object>}
+   */
+  async getActivitySummary(userId) {
+    try {
+      const query = `
+        SELECT 
+          u.last_login,
+          u.created_at,
+          (SELECT COUNT(*) FROM service_requests WHERE requested_by_id = $1) as service_requests_created,
+          (SELECT COUNT(*) FROM service_requests WHERE assigned_to_id = $1) as service_requests_assigned
+        FROM users u
+        WHERE u.user_id = \$1
+      `;
+      
+      const result = await this.db.query(query, [userId]);
+      return result.rows[0] || {};
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.getActivitySummary:', error);
+      throw new Error(`Failed to get activity summary: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get users count by role
+   * @param {string} role - User role
+   * @param {number} companyId - Company ID (optional)
+   * @returns {Promise<number>}
+   */
+  async getCountByRole(role, companyId = null) {
+    try {
+      let query = `
+        SELECT COUNT(*) as count 
+        FROM users 
+        WHERE role = $1
+      `;
+      
+      const params = [role];
+
+      if (companyId) {
+        query += ` AND company_id = $2`;
+        params.push(companyId);
       }
 
       const result = await this.db.query(query, params);
       return parseInt(result.rows[0].count);
     } catch (error) {
-      throw new Error(`Error counting users: ${error.message}`);
+      console.error('Error in PostgreSQLUserRepository.getCountByRole:', error);
+      throw new Error(`Failed to get count by role: ${error.message}`);
     }
   }
 
-  mapToEntity(row) {
+  /**
+   * Get recently created users
+   * @param {number} limit - Number of users to return
+   * @param {number} companyId - Company ID (optional)
+   * @returns {Promise<User[]>}
+   */
+  async getRecentlyCreated(limit = 10, companyId = null) {
+    try {
+      let query = `
+        SELECT u.*, c.name as company_name, c.type as company_type
+        FROM users u
+        LEFT JOIN companies c ON u.company_id = c.company_id
+        
+      `;
+      
+      const params = [];
+      let paramCount = 0;
+
+      if (companyId) {
+        paramCount++;
+        query += ` AND u.company_id = $${paramCount}`;
+        params.push(companyId);
+      }
+
+      paramCount++;
+      query += ` ORDER BY u.created_at DESC LIMIT $${paramCount}`;
+      params.push(limit);
+
+      const result = await this.db.query(query, params);
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.getRecentlyCreated:', error);
+      throw new Error(`Failed to get recently created users: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get users with pagination
+   * @param {Object} options - Pagination options
+   * @returns {Promise<Object>} Users with pagination info
+   */
+  async findWithPagination(options = {}) {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        role,
+        companyId,
+        isActive,
+        search,
+        sortBy = 'first_name',
+        sortOrder = 'ASC'
+      } = options;
+
+      const offset = (page - 1) * limit;
+      let whereConditions = ['1=1'];
+      const params = [];
+      let paramCount = 0;
+
+      if (role) {
+        paramCount++;
+        whereConditions.push(`u.role = $${paramCount}`);
+        params.push(role);
+      }
+
+      if (companyId) {
+        paramCount++;
+        whereConditions.push(`u.company_id = $${paramCount}`);
+        params.push(companyId);
+      }
+
+      if (isActive !== undefined) {
+        paramCount++;
+        whereConditions.push(`u.is_active = $${paramCount}`);
+        params.push(isActive);
+      }
+
+      if (search) {
+        paramCount++;
+        whereConditions.push(`(u.first_name ILIKE $${paramCount} OR u.last_name ILIKE $${paramCount} OR u.email ILIKE $${paramCount})`);
+        params.push(`%${search}%`);
+      }
+
+      const whereClause = whereConditions.join(' AND ');
+
+      // Get total count
+      const countQuery = `
+        SELECT COUNT(*) as count 
+        FROM users u 
+        WHERE ${whereClause}
+      `;
+      const countResult = await this.db.query(countQuery, params);
+      const total = parseInt(countResult.rows[0].count);
+
+      // Get users
+      paramCount++;
+      const limitParam = paramCount;
+      paramCount++;
+      const offsetParam = paramCount;
+      
+      const dataQuery = `
+        SELECT u.*, c.name as company_name, c.type as company_type
+        FROM users u
+        LEFT JOIN companies c ON u.company_id = c.company_id
+        WHERE ${whereClause}
+        ORDER BY u.${this.camelToSnake(sortBy)} ${sortOrder}
+        LIMIT $${limitParam} OFFSET $${offsetParam}
+      `;
+      
+      params.push(limit, offset);
+      const dataResult = await this.db.query(dataQuery, params);
+
+      return {
+        data: dataResult.rows.map(row => this.mapRowToEntity(row)),
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLUserRepository.findWithPagination:', error);
+      throw new Error(`Failed to get users with pagination: ${error.message}`);
+    }
+  }
+
+  // Private helper methods
+
+  /**
+   * Convert camelCase to snake_case
+   * @param {string} str - String in camelCase
+   * @returns {string} String in snake_case
+   */
+  camelToSnake(str) {
+    return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+  }
+
+  /**
+   * Convert snake_case to camelCase
+   * @param {string} str - String in snake_case
+   * @returns {string} String in camelCase
+   */
+  snakeToCamel(str) {
+    return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+  }
+
+  /**
+   * Map database row to User entity
+   * @param {Object} row - Database row
+   * @returns {User} User entity
+   */
+  mapRowToEntity(row) {
     return new User({
-      userId: row.user_id,
-      name: row.name,
-      email: row.email,
-      passwordHash: row.password_hash,
-      role: row.role,
-      phone: row.phone,
-      position: row.position,
-      department: row.department,
+      id: row.user_id,
       companyId: row.company_id,
-      profileImage: row.profile_image,
-      specialties: row.specialties,
-      certifications: row.certifications ? JSON.parse(row.certifications) : null,
-      skills: row.skills,
-      experienceYears: row.experience_years,
-      status: row.status,
-      notificationPreferences: row.notification_preferences ? 
-        JSON.parse(row.notification_preferences) : null,
-      timezone: row.timezone,
-      language: row.language,
-      twoFactorEnabled: row.two_factor_enabled,
-      lastActivityAt: row.last_activity_at,
-      emailVerifiedAt: row.email_verified_at,
+      firstName: row.first_name,
+      lastName: row.last_name,
+      email: row.email,
+      password: row.password, // This will be excluded in toJSON()
+      phone: row.phone,
+      role: row.role,
+      isActive: row.is_active,
+      isAdmin: row.is_admin,
+      lastLogin: row.last_login,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     });
@@ -544,3 +719,4 @@ class PostgreSQLUserRepository extends IUserRepository {
 }
 
 module.exports = PostgreSQLUserRepository;
+

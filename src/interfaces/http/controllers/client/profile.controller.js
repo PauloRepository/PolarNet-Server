@@ -1,198 +1,192 @@
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
-const db = require('../../../../infrastructure/database/index');
 
 class ProfileController {
-  // GET /api/client/profile - Obtener perfil de empresa
+  constructor() {
+    this.container = null;
+    this.logger = null;
+  }
+
+  // Inject DI container
+  setContainer(container) {
+    this.container = container;
+    this.logger = container.resolve('logger');
+  }
+
+  // GET /api/client/profile - Obtener perfil del cliente usando DDD
   async getProfile(req, res) {
     try {
-      const { clientCompanyId } = req.user;
+      const { clientCompanyId, id: userId } = req.user;
 
-      const companyQuery = `
-        SELECT 
-          c.*,
-          COUNT(DISTINCT u.user_id) as total_users,
-          COUNT(DISTINCT l.location_id) as total_locations,
-          COUNT(DISTINCT ar.rental_id) as active_rentals
-        FROM companies c
-        LEFT JOIN users u ON c.company_id = u.company_id AND u.status = 'ACTIVE'
-        LEFT JOIN company_locations l ON c.company_id = l.company_id AND l.status = 'ACTIVE'
-        LEFT JOIN active_rentals ar ON c.company_id = ar.client_company_id
-        WHERE c.company_id = $1
-        GROUP BY c.company_id
-      `;
-
-      const result = await db.query(companyQuery, [clientCompanyId]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.error(res, 'Empresa no encontrada', 'COMPANY_NOT_FOUND', 404);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      const company = result.rows[0];
+      this.logger.info('Getting client profile', { clientCompanyId, userId });
 
-      return ResponseHandler.success(res, {
+      // Get repositories
+      const userRepository = this.container.resolve('userRepository');
+      const companyRepository = this.container.resolve('companyRepository');
+
+      // Get user and company info
+      const user = await userRepository.findById(userId);
+      const company = await companyRepository.findById(clientCompanyId);
+
+      if (!user || !company) {
+        return ResponseHandler.error(res, 'Profile not found', 404);
+      }
+
+      const profile = {
+        user: {
+          userId: user.id.toString(),
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone,
+          avatar: user.avatar,
+          lastLogin: user.lastLogin,
+          status: user.status,
+          preferences: user.preferences || {}
+        },
         company: {
-          companyId: company.company_id.toString(),
+          companyId: company.id.toString(),
           name: company.name,
           email: company.email,
           phone: company.phone,
           address: company.address,
-          city: company.city,
-          state: company.state,
-          zipCode: company.zip_code,
-          country: company.country,
-          taxId: company.tax_id,
+          taxId: company.taxId,
+          contactPerson: company.contactPerson,
           website: company.website,
           industry: company.industry,
-          companySize: company.company_size,
           description: company.description,
-          logoUrl: company.logo_url,
+          logo: company.logo,
           status: company.status,
-          createdAt: company.created_at,
-          stats: {
-            totalUsers: parseInt(company.total_users),
-            totalLocations: parseInt(company.total_locations),
-            activeRentals: parseInt(company.active_rentals)
-          }
+          registrationDate: company.createdAt
         }
-      }, 'Perfil de empresa obtenido exitosamente');
+      };
+
+      return ResponseHandler.success(res, profile, 'Profile retrieved successfully');
 
     } catch (error) {
-      console.error('Error en getProfile:', error);
-      return ResponseHandler.error(res, 'Error al obtener perfil', 'GET_PROFILE_ERROR', 500);
+      this.logger?.error('Error in getProfile', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/client/profile - Actualizar perfil de empresa
+  // PUT /api/client/profile - Actualizar perfil usando DDD
   async updateProfile(req, res) {
     try {
-      const { clientCompanyId } = req.user;
+      const { clientCompanyId, id: userId } = req.user;
       const {
-        name,
-        email,
-        phone,
-        address,
-        city,
-        state,
-        zipCode,
-        country,
-        website,
-        industry,
-        companySize,
-        description
+        userUpdates = {},
+        companyUpdates = {}
       } = req.body;
 
-      const updateQuery = `
-        UPDATE companies 
-        SET 
-          name = $2,
-          email = $3,
-          phone = $4,
-          address = $5,
-          city = $6,
-          state = $7,
-          zip_code = $8,
-          country = $9,
-          website = $10,
-          industry = $11,
-          company_size = $12,
-          description = $13,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE company_id = $1
-        RETURNING *
-      `;
-
-      const result = await db.query(updateQuery, [
-        clientCompanyId,
-        name,
-        email,
-        phone,
-        address,
-        city,
-        state,
-        zipCode,
-        country,
-        website,
-        industry,
-        companySize,
-        description
-      ]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.error(res, 'Empresa no encontrada', 'COMPANY_NOT_FOUND', 404);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      const company = result.rows[0];
+      this.logger.info('Updating client profile', { clientCompanyId, userId });
 
-      return ResponseHandler.success(res, {
+      // Get repositories
+      const userRepository = this.container.resolve('userRepository');
+      const companyRepository = this.container.resolve('companyRepository');
+
+      let updatedUser = null;
+      let updatedCompany = null;
+
+      // Update user if user updates provided
+      if (Object.keys(userUpdates).length > 0) {
+        updatedUser = await userRepository.update(userId, userUpdates);
+      }
+
+      // Update company if company updates provided
+      if (Object.keys(companyUpdates).length > 0) {
+        updatedCompany = await companyRepository.update(clientCompanyId, companyUpdates);
+      }
+
+      // Get fresh data
+      const user = updatedUser || await userRepository.findById(userId);
+      const company = updatedCompany || await companyRepository.findById(clientCompanyId);
+
+      const updatedProfile = {
+        user: {
+          userId: user.id.toString(),
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          avatar: user.avatar,
+          preferences: user.preferences || {}
+        },
         company: {
-          companyId: company.company_id.toString(),
+          companyId: company.id.toString(),
           name: company.name,
           email: company.email,
           phone: company.phone,
           address: company.address,
-          city: company.city,
-          state: company.state,
-          zipCode: company.zip_code,
-          country: company.country,
+          contactPerson: company.contactPerson,
           website: company.website,
           industry: company.industry,
-          companySize: company.company_size,
           description: company.description,
-          updatedAt: company.updated_at
+          logo: company.logo
         }
-      }, 'Perfil actualizado exitosamente');
+      };
+
+      return ResponseHandler.success(res, updatedProfile, 'Profile updated successfully');
 
     } catch (error) {
-      console.error('Error en updateProfile:', error);
-      return ResponseHandler.error(res, 'Error al actualizar perfil', 'UPDATE_PROFILE_ERROR', 500);
+      this.logger?.error('Error in updateProfile', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // GET /api/client/profile/locations - Obtener ubicaciones de la empresa
+  // GET /api/client/profile/locations - Obtener ubicaciones usando DDD
   async getLocations(req, res) {
     try {
       const { clientCompanyId } = req.user;
 
-      const locationsQuery = `
-        SELECT 
-          cl.*,
-          COUNT(DISTINCT ar.rental_id) as active_rentals
-        FROM company_locations cl
-        LEFT JOIN active_rentals ar ON cl.location_id = ar.location_id
-        WHERE cl.company_id = $1
-        GROUP BY cl.location_id
-        ORDER BY cl.is_main DESC, cl.name ASC
-      `;
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
+      }
 
-      const result = await db.query(locationsQuery, [clientCompanyId]);
+      this.logger.info('Getting client locations', { clientCompanyId });
 
-      const locations = result.rows.map(location => ({
-        locationId: location.location_id.toString(),
+      // Get repository
+      const equipmentLocationRepository = this.container.resolve('equipmentLocationRepository');
+
+      // Get locations for client company
+      const locations = await equipmentLocationRepository.findByCompany(clientCompanyId);
+
+      const formattedLocations = locations.map(location => ({
+        locationId: location.id.toString(),
         name: location.name,
         address: location.address,
         city: location.city,
         state: location.state,
-        zipCode: location.zip_code,
+        postalCode: location.postalCode,
         country: location.country,
+        contactPerson: location.contactPerson,
         phone: location.phone,
         email: location.email,
-        isMain: location.is_main,
-        status: location.status,
-        activeRentals: parseInt(location.active_rentals),
-        createdAt: location.created_at
+        operatingHours: location.operatingHours,
+        specialInstructions: location.specialInstructions,
+        isActive: location.isActive,
+        equipmentCount: location.getEquipmentCount(),
+        coordinates: location.coordinates,
+        createdAt: location.createdAt
       }));
 
       return ResponseHandler.success(res, {
-        locations
-      }, 'Ubicaciones obtenidas exitosamente');
+        locations: formattedLocations,
+        total: formattedLocations.length
+      }, 'Locations retrieved successfully');
 
     } catch (error) {
-      console.error('Error en getLocations:', error);
-      return ResponseHandler.error(res, 'Error al obtener ubicaciones', 'GET_LOCATIONS_ERROR', 500);
+      this.logger?.error('Error in getLocations', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // POST /api/client/profile/locations - Crear nueva ubicación
+  // POST /api/client/profile/locations - Crear ubicación usando DDD
   async createLocation(req, res) {
     try {
       const { clientCompanyId } = req.user;
@@ -201,458 +195,383 @@ class ProfileController {
         address,
         city,
         state,
-        zipCode,
+        postalCode,
         country,
+        contactPerson,
         phone,
         email,
-        isMain = false
+        operatingHours,
+        specialInstructions,
+        coordinates
       } = req.body;
 
-      // Si es ubicación principal, actualizar las demás
-      if (isMain) {
-        await db.query(`
-          UPDATE company_locations 
-          SET is_main = false 
-          WHERE company_id = $1
-        `, [clientCompanyId]);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      const insertQuery = `
-        INSERT INTO company_locations (
-          company_id,
-          name,
-          address,
-          city,
-          state,
-          zip_code,
-          country,
-          phone,
-          email,
-          is_main,
-          status,
-          created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE', CURRENT_TIMESTAMP)
-        RETURNING *
-      `;
+      this.logger.info('Creating location', { clientCompanyId, name });
 
-      const result = await db.query(insertQuery, [
-        clientCompanyId,
+      // Get use case
+      const createLocationUseCase = this.container.resolve('createEquipmentLocation');
+
+      // Create location
+      const location = await createLocationUseCase.execute({
+        companyId: clientCompanyId,
         name,
         address,
         city,
         state,
-        zipCode,
+        postalCode,
         country,
+        contactPerson,
         phone,
         email,
-        isMain
-      ]);
-
-      const location = result.rows[0];
+        operatingHours,
+        specialInstructions,
+        coordinates
+      });
 
       return ResponseHandler.success(res, {
-        location: {
-          locationId: location.location_id.toString(),
-          name: location.name,
-          address: location.address,
-          city: location.city,
-          state: location.state,
-          zipCode: location.zip_code,
-          country: location.country,
-          phone: location.phone,
-          email: location.email,
-          isMain: location.is_main,
-          status: location.status,
-          createdAt: location.created_at
-        }
-      }, 'Ubicación creada exitosamente');
+        locationId: location.id.toString(),
+        name: location.name,
+        address: location.address,
+        city: location.city,
+        state: location.state,
+        postalCode: location.postalCode,
+        country: location.country,
+        contactPerson: location.contactPerson,
+        phone: location.phone,
+        email: location.email,
+        isActive: location.isActive,
+        createdAt: location.createdAt
+      }, 'Location created successfully', 201);
 
     } catch (error) {
-      console.error('Error en createLocation:', error);
-      return ResponseHandler.error(res, 'Error al crear ubicación', 'CREATE_LOCATION_ERROR', 500);
+      this.logger?.error('Error in createLocation', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/client/profile/locations/:id - Actualizar ubicación
+  // PUT /api/client/profile/locations/:locationId - Actualizar ubicación usando DDD
   async updateLocation(req, res) {
     try {
       const { clientCompanyId } = req.user;
-      const { id } = req.params;
-      const {
-        name,
-        address,
-        city,
-        state,
-        zipCode,
-        country,
-        phone,
-        email,
-        isMain
-      } = req.body;
+      const { locationId } = req.params;
+      const updateData = req.body;
 
-      // Verificar que la ubicación pertenece a la empresa
-      const checkQuery = `
-        SELECT location_id FROM company_locations 
-        WHERE location_id = $1 AND company_id = $2
-      `;
-
-      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
-
-      if (checkResult.rows.length === 0) {
-        return ResponseHandler.error(res, 'Ubicación no encontrada', 'LOCATION_NOT_FOUND', 404);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      // Si es ubicación principal, actualizar las demás
-      if (isMain) {
-        await db.query(`
-          UPDATE company_locations 
-          SET is_main = false 
-          WHERE company_id = $1 AND location_id != $2
-        `, [clientCompanyId, id]);
+      this.logger.info('Updating location', { clientCompanyId, locationId });
+
+      // Get repository
+      const equipmentLocationRepository = this.container.resolve('equipmentLocationRepository');
+
+      // Verify location belongs to client
+      const location = await equipmentLocationRepository.findById(locationId);
+      if (!location || location.companyId !== clientCompanyId) {
+        return ResponseHandler.error(res, 'Location not found', 404);
       }
 
-      const updateQuery = `
-        UPDATE company_locations 
-        SET 
-          name = $3,
-          address = $4,
-          city = $5,
-          state = $6,
-          zip_code = $7,
-          country = $8,
-          phone = $9,
-          email = $10,
-          is_main = $11,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE location_id = $1 AND company_id = $2
-        RETURNING *
-      `;
-
-      const result = await db.query(updateQuery, [
-        id,
-        clientCompanyId,
-        name,
-        address,
-        city,
-        state,
-        zipCode,
-        country,
-        phone,
-        email,
-        isMain
-      ]);
-
-      const location = result.rows[0];
+      // Update location
+      const updatedLocation = await equipmentLocationRepository.update(locationId, updateData);
 
       return ResponseHandler.success(res, {
-        location: {
-          locationId: location.location_id.toString(),
-          name: location.name,
-          address: location.address,
-          city: location.city,
-          state: location.state,
-          zipCode: location.zip_code,
-          country: location.country,
-          phone: location.phone,
-          email: location.email,
-          isMain: location.is_main,
-          status: location.status,
-          updatedAt: location.updated_at
-        }
-      }, 'Ubicación actualizada exitosamente');
+        locationId: updatedLocation.id.toString(),
+        name: updatedLocation.name,
+        address: updatedLocation.address,
+        city: updatedLocation.city,
+        state: updatedLocation.state,
+        contactPerson: updatedLocation.contactPerson,
+        phone: updatedLocation.phone,
+        email: updatedLocation.email,
+        isActive: updatedLocation.isActive,
+        updatedAt: updatedLocation.updatedAt
+      }, 'Location updated successfully');
 
     } catch (error) {
-      console.error('Error en updateLocation:', error);
-      return ResponseHandler.error(res, 'Error al actualizar ubicación', 'UPDATE_LOCATION_ERROR', 500);
+      this.logger?.error('Error in updateLocation', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // DELETE /api/client/profile/locations/:id - Eliminar ubicación
+  // DELETE /api/client/profile/locations/:locationId - Eliminar ubicación usando DDD
   async deleteLocation(req, res) {
     try {
       const { clientCompanyId } = req.user;
-      const { id } = req.params;
+      const { locationId } = req.params;
 
-      // Verificar que no sea la ubicación principal
-      const checkQuery = `
-        SELECT location_id, is_main FROM company_locations 
-        WHERE location_id = $1 AND company_id = $2
-      `;
-
-      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
-
-      if (checkResult.rows.length === 0) {
-        return ResponseHandler.error(res, 'Ubicación no encontrada', 'LOCATION_NOT_FOUND', 404);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      if (checkResult.rows[0].is_main) {
-        return ResponseHandler.error(res, 'No se puede eliminar la ubicación principal', 'CANNOT_DELETE_MAIN_LOCATION', 400);
+      this.logger.info('Deleting location', { clientCompanyId, locationId });
+
+      // Get repositories
+      const equipmentLocationRepository = this.container.resolve('equipmentLocationRepository');
+      const equipmentRepository = this.container.resolve('equipmentRepository');
+
+      // Verify location belongs to client
+      const location = await equipmentLocationRepository.findById(locationId);
+      if (!location || location.companyId !== clientCompanyId) {
+        return ResponseHandler.error(res, 'Location not found', 404);
       }
 
-      // Verificar que no tenga equipos activos
-      const equipmentCheck = await db.query(`
-        SELECT COUNT(*) as count
-        FROM active_rentals 
-        WHERE location_id = $1
-      `, [id]);
-
-      if (parseInt(equipmentCheck.rows[0].count) > 0) {
-        return ResponseHandler.error(res, 'No se puede eliminar ubicación con equipos activos', 'LOCATION_HAS_ACTIVE_RENTALS', 400);
+      // Check if location has active equipment
+      const equipmentCount = await equipmentRepository.countByLocation(locationId);
+      if (equipmentCount > 0) {
+        return ResponseHandler.error(res, 'Cannot delete location with active equipment', 400);
       }
 
-      await db.query(`
-        UPDATE company_locations 
-        SET status = 'INACTIVE', updated_at = CURRENT_TIMESTAMP
-        WHERE location_id = $1 AND company_id = $2
-      `, [id, clientCompanyId]);
+      // Soft delete location
+      await equipmentLocationRepository.softDelete(locationId);
 
       return ResponseHandler.success(res, {
-        message: 'Ubicación eliminada exitosamente'
-      }, 'Ubicación eliminada exitosamente');
+        locationId: locationId,
+        deleted: true,
+        deletedAt: new Date()
+      }, 'Location deleted successfully');
 
     } catch (error) {
-      console.error('Error en deleteLocation:', error);
-      return ResponseHandler.error(res, 'Error al eliminar ubicación', 'DELETE_LOCATION_ERROR', 500);
+      this.logger?.error('Error in deleteLocation', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // GET /api/client/profile/users - Obtener usuarios de la empresa
+  // GET /api/client/profile/users - Obtener usuarios de la empresa usando DDD
   async getUsers(req, res) {
     try {
       const { clientCompanyId } = req.user;
 
-      const usersQuery = `
-        SELECT 
-          u.*,
-          COUNT(DISTINCT ar.rental_id) as managed_rentals
-        FROM users u
-        LEFT JOIN active_rentals ar ON u.user_id = ar.client_contact_id
-        WHERE u.company_id = $1
-        GROUP BY u.user_id
-        ORDER BY u.created_at DESC
-      `;
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
+      }
 
-      const result = await db.query(usersQuery, [clientCompanyId]);
+      this.logger.info('Getting company users', { clientCompanyId });
 
-      const users = result.rows.map(user => ({
-        userId: user.user_id.toString(),
+      // Get repository
+      const userRepository = this.container.resolve('userRepository');
+
+      // Get company users
+      const users = await userRepository.findByCompany(clientCompanyId);
+
+      const formattedUsers = users.map(user => ({
+        userId: user.id.toString(),
         name: user.name,
         email: user.email,
-        phone: user.phone,
         role: user.role,
+        phone: user.phone,
         status: user.status,
-        lastLogin: user.last_login,
-        managedRentals: parseInt(user.managed_rentals),
-        createdAt: user.created_at
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        avatar: user.avatar,
+        permissions: user.permissions || []
       }));
 
       return ResponseHandler.success(res, {
-        users
-      }, 'Usuarios obtenidos exitosamente');
+        users: formattedUsers,
+        total: formattedUsers.length
+      }, 'Company users retrieved successfully');
 
     } catch (error) {
-      console.error('Error en getUsers:', error);
-      return ResponseHandler.error(res, 'Error al obtener usuarios', 'GET_USERS_ERROR', 500);
+      this.logger?.error('Error in getUsers', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // POST /api/client/profile/users - Invitar nuevo usuario
+  // POST /api/client/profile/users/invite - Invitar usuario usando DDD
   async inviteUser(req, res) {
     try {
       const { clientCompanyId } = req.user;
       const {
-        name,
         email,
-        phone,
-        role = 'USER'
+        name,
+        role = 'USER',
+        permissions = []
       } = req.body;
 
-      // Verificar que el email no esté en uso
-      const emailCheck = await db.query(`
-        SELECT user_id FROM users WHERE email = $1
-      `, [email]);
-
-      if (emailCheck.rows.length > 0) {
-        return ResponseHandler.error(res, 'El email ya está en uso', 'EMAIL_ALREADY_EXISTS', 400);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      const insertQuery = `
-        INSERT INTO users (
-          company_id,
-          name,
-          email,
-          phone,
-          role,
-          status,
-          created_at
-        ) VALUES ($1, $2, $3, $4, $5, 'PENDING', CURRENT_TIMESTAMP)
-        RETURNING *
-      `;
+      this.logger.info('Inviting user', { clientCompanyId, email, role });
 
-      const result = await db.query(insertQuery, [
-        clientCompanyId,
-        name,
+      // Get use case
+      const inviteUserUseCase = this.container.resolve('inviteCompanyUser');
+
+      // Invite user
+      const invitation = await inviteUserUseCase.execute({
+        companyId: clientCompanyId,
         email,
-        phone,
-        role
-      ]);
-
-      const user = result.rows[0];
+        name,
+        role,
+        permissions,
+        invitedBy: req.user.id
+      });
 
       return ResponseHandler.success(res, {
-        user: {
-          userId: user.user_id.toString(),
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-          status: user.status,
-          createdAt: user.created_at
-        },
-        message: 'Invitación enviada. El usuario recibirá un email para completar el registro.'
-      }, 'Usuario invitado exitosamente');
+        invitationId: invitation.id.toString(),
+        email: invitation.email,
+        name: invitation.name,
+        role: invitation.role,
+        status: invitation.status,
+        invitedAt: invitation.invitedAt,
+        expiresAt: invitation.expiresAt
+      }, 'User invitation sent successfully', 201);
 
     } catch (error) {
-      console.error('Error en inviteUser:', error);
-      return ResponseHandler.error(res, 'Error al invitar usuario', 'INVITE_USER_ERROR', 500);
+      this.logger?.error('Error in inviteUser', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/client/profile/users/:id/status - Actualizar estado de usuario
+  // PUT /api/client/profile/users/:userId/status - Actualizar estado de usuario usando DDD
   async updateUserStatus(req, res) {
     try {
       const { clientCompanyId } = req.user;
-      const { id } = req.params;
-      const { status } = req.body;
+      const { userId } = req.params;
+      const { status, role, permissions } = req.body;
 
-      // Verificar que el usuario pertenece a la empresa
-      const checkQuery = `
-        SELECT user_id FROM users 
-        WHERE user_id = $1 AND company_id = $2
-      `;
-
-      const checkResult = await db.query(checkQuery, [id, clientCompanyId]);
-
-      if (checkResult.rows.length === 0) {
-        return ResponseHandler.error(res, 'Usuario no encontrado', 'USER_NOT_FOUND', 404);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      const updateQuery = `
-        UPDATE users 
-        SET status = $3, updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = $1 AND company_id = $2
-        RETURNING *
-      `;
+      this.logger.info('Updating user status', { clientCompanyId, userId, status });
 
-      const result = await db.query(updateQuery, [id, clientCompanyId, status]);
+      // Get repository
+      const userRepository = this.container.resolve('userRepository');
 
-      const user = result.rows[0];
+      // Verify user belongs to company
+      const user = await userRepository.findById(userId);
+      if (!user || user.companyId !== clientCompanyId) {
+        return ResponseHandler.error(res, 'User not found', 404);
+      }
+
+      // Update user
+      const updateData = {};
+      if (status !== undefined) updateData.status = status;
+      if (role !== undefined) updateData.role = role;
+      if (permissions !== undefined) updateData.permissions = permissions;
+
+      const updatedUser = await userRepository.update(userId, updateData);
 
       return ResponseHandler.success(res, {
-        user: {
-          userId: user.user_id.toString(),
-          name: user.name,
-          email: user.email,
-          status: user.status,
-          updatedAt: user.updated_at
-        }
-      }, 'Estado de usuario actualizado exitosamente');
+        userId: updatedUser.id.toString(),
+        name: updatedUser.name,
+        email: updatedUser.email,
+        status: updatedUser.status,
+        role: updatedUser.role,
+        permissions: updatedUser.permissions,
+        updatedAt: updatedUser.updatedAt
+      }, 'User status updated successfully');
 
     } catch (error) {
-      console.error('Error en updateUserStatus:', error);
-      return ResponseHandler.error(res, 'Error al actualizar estado', 'UPDATE_USER_STATUS_ERROR', 500);
+      this.logger?.error('Error in updateUserStatus', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // GET /api/client/profile/activity - Obtener actividad de la empresa
+  // GET /api/client/profile/activity - Obtener actividad de la empresa usando DDD
   async getCompanyActivity(req, res) {
     try {
       const { clientCompanyId } = req.user;
       const { 
         page = 1, 
-        limit = 20,
-        startDate,
-        endDate 
+        limit = 50,
+        dateFrom,
+        dateTo,
+        activityType
       } = req.query;
-      const offset = (page - 1) * limit;
 
-      let whereClause = `WHERE (
-        ar.client_company_id = $1 OR 
-        sr.client_company_id = $1 OR 
-        i.client_company_id = $1
-      )`;
-      let queryParams = [clientCompanyId];
-      let paramCount = 1;
-
-      if (startDate) {
-        whereClause += ` AND activity_date >= $${++paramCount}`;
-        queryParams.push(startDate);
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
       }
 
-      if (endDate) {
-        whereClause += ` AND activity_date <= $${++paramCount}`;
-        queryParams.push(endDate);
+      this.logger.info('Getting company activity', { clientCompanyId, page, limit });
+
+      // Get repositories
+      const userRepository = this.container.resolve('userRepository');
+      const serviceRequestRepository = this.container.resolve('serviceRequestRepository');
+      const invoiceRepository = this.container.resolve('invoiceRepository');
+
+      // Build filters
+      const filters = {
+        page: parseInt(page),
+        limit: parseInt(limit)
+      };
+
+      if (dateFrom) filters.dateFrom = new Date(dateFrom);
+      if (dateTo) filters.dateTo = new Date(dateTo);
+
+      const activities = [];
+
+      // Get user activities
+      if (!activityType || activityType === 'user') {
+        const userActivities = await userRepository.getCompanyActivity(clientCompanyId, filters);
+        userActivities.forEach(activity => {
+          activities.push({
+            type: 'user_activity',
+            id: activity.id.toString(),
+            description: activity.description,
+            userId: activity.userId.toString(),
+            userName: activity.userName,
+            timestamp: activity.timestamp,
+            details: activity.details
+          });
+        });
       }
 
-      const activityQuery = `
-        SELECT * FROM (
-          SELECT 
-            'RENTAL_STARTED' as activity_type,
-            ar.start_date as activity_date,
-            'Inicio de renta de ' || e.name as description,
-            ar.rental_id::text as reference_id
-          FROM active_rentals ar
-          LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
-          WHERE ar.client_company_id = $1
-          
-          UNION ALL
-          
-          SELECT 
-            'SERVICE_REQUEST' as activity_type,
-            sr.created_at as activity_date,
-            'Solicitud de servicio: ' || sr.description as description,
-            sr.request_id::text as reference_id
-          FROM service_requests sr
-          WHERE sr.client_company_id = $1
-          
-          UNION ALL
-          
-          SELECT 
-            'INVOICE_GENERATED' as activity_type,
-            i.invoice_date as activity_date,
-            'Factura generada: ' || i.invoice_number as description,
-            i.invoice_id::text as reference_id
-          FROM invoices i
-          WHERE i.client_company_id = $1
-        ) activities
-        ${whereClause.replace('WHERE (', 'WHERE (')}
-        ORDER BY activity_date DESC
-        LIMIT $${++paramCount} OFFSET $${++paramCount}
-      `;
+      // Get service request activities
+      if (!activityType || activityType === 'service_request') {
+        const serviceActivities = await serviceRequestRepository.getCompanyActivity(clientCompanyId, filters);
+        serviceActivities.forEach(activity => {
+          activities.push({
+            type: 'service_request',
+            id: activity.id.toString(),
+            description: activity.description,
+            serviceRequestId: activity.serviceRequestId.toString(),
+            status: activity.status,
+            timestamp: activity.timestamp,
+            details: activity.details
+          });
+        });
+      }
 
-      queryParams.push(limit, offset);
+      // Get invoice activities
+      if (!activityType || activityType === 'invoice') {
+        const invoiceActivities = await invoiceRepository.getCompanyActivity(clientCompanyId, filters);
+        invoiceActivities.forEach(activity => {
+          activities.push({
+            type: 'invoice',
+            id: activity.id.toString(),
+            description: activity.description,
+            invoiceId: activity.invoiceId.toString(),
+            amount: activity.amount,
+            timestamp: activity.timestamp,
+            details: activity.details
+          });
+        });
+      }
 
-      const result = await db.query(activityQuery, queryParams);
-
-      const activities = result.rows.map(activity => ({
-        activityType: activity.activity_type,
-        activityDate: activity.activity_date,
-        description: activity.description,
-        referenceId: activity.reference_id
-      }));
+      // Sort by timestamp (most recent first)
+      const sortedActivities = activities
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, limit);
 
       return ResponseHandler.success(res, {
-        activities,
+        activities: sortedActivities,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: activities.length
+          total: activities.length,
+          totalPages: Math.ceil(activities.length / limit)
         }
-      }, 'Actividad empresarial obtenida exitosamente');
+      }, 'Company activity retrieved successfully');
 
     } catch (error) {
-      console.error('Error en getCompanyActivity:', error);
-      return ResponseHandler.error(res, 'Error al obtener actividad', 'GET_ACTIVITY_ERROR', 500);
+      this.logger?.error('Error in getCompanyActivity', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 }

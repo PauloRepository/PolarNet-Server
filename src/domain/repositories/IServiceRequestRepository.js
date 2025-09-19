@@ -1,188 +1,283 @@
 /**
- * Service Request Repository Interface
- * Define el contrato para la persistencia de solicitudes de servicio
+ * Repository Interface: Service Request
+ * Defines the contract for service request data persistence
  */
 class IServiceRequestRepository {
-  
   /**
-   * Busca una solicitud de servicio por su ID
-   * @param {string} serviceRequestId 
+   * Find service request by ID
+   * @param {number} id - Service request ID
    * @returns {Promise<ServiceRequest|null>}
    */
-  async findById(serviceRequestId) {
-    throw new Error('Method not implemented');
+  async findById(id) {
+    throw new Error('Method findById must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por proveedor
-   * @param {string} providerCompanyId 
-   * @param {Object} filters - Filtros opcionales
+   * Find service requests by client company
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByProvider(providerCompanyId, filters = {}) {
-    throw new Error('Method not implemented');
+  async findByClientCompany(clientCompanyId, filters = {}) {
+    throw new Error('Method findByClientCompany must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por cliente
-   * @param {string} clientCompanyId 
-   * @param {Object} filters - Filtros opcionales
+   * Find service requests by provider company
+   * @param {number} providerCompanyId - Provider company ID
+   * @param {Object} filters - Additional filters
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByClient(clientCompanyId, filters = {}) {
-    throw new Error('Method not implemented');
+  async findByProviderCompany(providerCompanyId, filters = {}) {
+    throw new Error('Method findByProviderCompany must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por estado
-   * @param {string|Array} status 
-   * @param {string} providerCompanyId 
+   * Find service requests by equipment
+   * @param {number} equipmentId - Equipment ID
+   * @param {Object} filters - Additional filters
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByStatus(status, providerCompanyId) {
-    throw new Error('Method not implemented');
+  async findByEquipment(equipmentId, filters = {}) {
+    throw new Error('Method findByEquipment must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por prioridad
-   * @param {string} priority 
-   * @param {string} providerCompanyId 
+   * Find service requests by status
+   * @param {string} status - Request status
+   * @param {Object} filters - Additional filters
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByPriority(priority, providerCompanyId) {
-    throw new Error('Method not implemented');
+  async findByStatus(status, filters = {}) {
+    throw new Error('Method findByStatus must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por técnico asignado
-   * @param {string} technicianId 
+   * Find pending service requests
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByTechnician(technicianId) {
-    throw new Error('Method not implemented');
+  async findPending(companyId, companyType) {
+    throw new Error('Method findPending must be implemented');
   }
 
   /**
-   * Busca solicitudes de servicio por equipo
-   * @param {string} equipmentId 
+   * Find urgent service requests
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
    * @returns {Promise<ServiceRequest[]>}
    */
-  async findByEquipment(equipmentId) {
-    throw new Error('Method not implemented');
+  async findUrgent(companyId, companyType) {
+    throw new Error('Method findUrgent must be implemented');
   }
 
   /**
-   * Busca solicitudes por rango de fechas
-   * @param {Date} startDate 
-   * @param {Date} endDate 
-   * @param {string} providerCompanyId 
-   * @returns {Promise<ServiceRequest[]>}
-   */
-  async findByDateRange(startDate, endDate, providerCompanyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca solicitudes urgentes (alta prioridad y críticas)
-   * @param {string} providerCompanyId 
-   * @returns {Promise<ServiceRequest[]>}
-   */
-  async findUrgentRequests(providerCompanyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca solicitudes vencidas
-   * @param {string} providerCompanyId 
-   * @returns {Promise<ServiceRequest[]>}
-   */
-  async findOverdueRequests(providerCompanyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Guarda una solicitud de servicio (crear o actualizar)
-   * @param {ServiceRequest} serviceRequest 
+   * Create new service request
+   * @param {Object} requestData - Service request data
    * @returns {Promise<ServiceRequest>}
    */
-  async save(serviceRequest) {
-    throw new Error('Method not implemented');
+  async create(requestData) {
+    throw new Error('Method create must be implemented');
   }
 
   /**
-   * Elimina una solicitud de servicio
-   * @param {string} serviceRequestId 
-   * @returns {Promise<boolean>}
+   * Update service request
+   * @param {number} id - Service request ID
+   * @param {Object} updateData - Update data
+   * @returns {Promise<ServiceRequest>}
    */
-  async delete(serviceRequestId) {
-    throw new Error('Method not implemented');
+  async update(id, updateData) {
+    throw new Error('Method update must be implemented');
   }
 
   /**
-   * Cuenta solicitudes por criterios
-   * @param {Object} criteria 
-   * @returns {Promise<number>}
+   * Update service request status
+   * @param {number} id - Service request ID
+   * @param {string} status - New status
+   * @param {string} notes - Status change notes
+   * @returns {Promise<ServiceRequest>}
    */
-  async count(criteria = {}) {
-    throw new Error('Method not implemented');
+  async updateStatus(id, status, notes = '') {
+    throw new Error('Method updateStatus must be implemented');
   }
 
   /**
-   * Busca con paginación
-   * @param {Object} params - { page, limit, filters }
-   * @returns {Promise<{serviceRequests: ServiceRequest[], total: number}>}
+   * Assign technician to service request
+   * @param {number} id - Service request ID
+   * @param {number} technicianId - Technician user ID
+   * @returns {Promise<ServiceRequest>}
    */
-  async findWithPagination(params) {
-    throw new Error('Method not implemented');
+  async assignTechnician(id, technicianId) {
+    throw new Error('Method assignTechnician must be implemented');
   }
 
   /**
-   * Obtiene estadísticas de solicitudes de servicio
-   * @param {string} providerCompanyId 
-   * @param {Object} period - { startDate, endDate }
+   * Add work log to service request
+   * @param {number} requestId - Service request ID
+   * @param {Object} workLogData - Work log data
    * @returns {Promise<Object>}
    */
-  async getStats(providerCompanyId, period) {
-    throw new Error('Method not implemented');
+  async addWorkLog(requestId, workLogData) {
+    throw new Error('Method addWorkLog must be implemented');
   }
 
   /**
-   * Asigna técnico a una solicitud
-   * @param {string} serviceRequestId 
-   * @param {string} technicianId 
-   * @returns {Promise<ServiceRequest>}
+   * Get service request work logs
+   * @param {number} requestId - Service request ID
+   * @returns {Promise<Object[]>}
    */
-  async assignTechnician(serviceRequestId, technicianId) {
-    throw new Error('Method not implemented');
+  async getWorkLogs(requestId) {
+    throw new Error('Method getWorkLogs must be implemented');
   }
 
   /**
-   * Actualiza estado de una solicitud
-   * @param {string} serviceRequestId 
-   * @param {string} newStatus 
-   * @returns {Promise<ServiceRequest>}
+   * Delete service request (soft delete)
+   * @param {number} id - Service request ID
+   * @returns {Promise<boolean>}
    */
-  async updateStatus(serviceRequestId, newStatus) {
-    throw new Error('Method not implemented');
+  async delete(id) {
+    throw new Error('Method delete must be implemented');
   }
 
   /**
-   * Busca solicitudes sin asignar
-   * @param {string} providerCompanyId 
-   * @returns {Promise<ServiceRequest[]>}
+   * Get client statistics
+   * @param {number} clientCompanyId - Client company ID
+   * @returns {Promise<Object>}
    */
-  async findUnassignedRequests(providerCompanyId) {
-    throw new Error('Method not implemented');
+  async getClientStatistics(clientCompanyId) {
+    throw new Error('Method getClientStatistics must be implemented');
   }
 
   /**
-   * Obtiene promedio de tiempo de resolución
-   * @param {string} providerCompanyId 
-   * @param {number} days - Días hacia atrás para calcular
+   * Get provider statistics
+   * @param {number} providerCompanyId - Provider company ID
+   * @returns {Promise<Object>}
+   */
+  async getProviderStatistics(providerCompanyId) {
+    throw new Error('Method getProviderStatistics must be implemented');
+  }
+
+  /**
+   * Get client request count
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
    * @returns {Promise<number>}
    */
-  async getAverageResolutionTime(providerCompanyId, days = 30) {
-    throw new Error('Method not implemented');
+  async getClientRequestCount(clientCompanyId, filters = {}) {
+    throw new Error('Method getClientRequestCount must be implemented');
+  }
+
+  /**
+   * Get provider request count
+   * @param {number} providerCompanyId - Provider company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<number>}
+   */
+  async getProviderRequestCount(providerCompanyId, filters = {}) {
+    throw new Error('Method getProviderRequestCount must be implemented');
+  }
+
+  /**
+   * Search service requests
+   * @param {string} query - Search query
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<ServiceRequest[]>}
+   */
+  async search(query, filters = {}) {
+    throw new Error('Method search must be implemented');
+  }
+
+  /**
+   * Get service requests count by status
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @returns {Promise<Object>}
+   */
+  async getCountByStatus(companyId, companyType) {
+    throw new Error('Method getCountByStatus must be implemented');
+  }
+
+  /**
+   * Get service requests count by priority
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @returns {Promise<Object>}
+   */
+  async getCountByPriority(companyId, companyType) {
+    throw new Error('Method getCountByPriority must be implemented');
+  }
+
+  /**
+   * Get service requests count by type
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @returns {Promise<Object>}
+   */
+  async getCountByType(companyId, companyType) {
+    throw new Error('Method getCountByType must be implemented');
+  }
+
+  /**
+   * Get average resolution time
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object>}
+   */
+  async getAverageResolutionTime(companyId, companyType, dateRange = {}) {
+    throw new Error('Method getAverageResolutionTime must be implemented');
+  }
+
+  /**
+   * Get technician performance metrics
+   * @param {number} providerCompanyId - Provider company ID
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object[]>}
+   */
+  async getTechnicianPerformance(providerCompanyId, dateRange = {}) {
+    throw new Error('Method getTechnicianPerformance must be implemented');
+  }
+
+  /**
+   * Get service request trends
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object[]>}
+   */
+  async getRequestTrends(companyId, companyType, dateRange = {}) {
+    throw new Error('Method getRequestTrends must be implemented');
+  }
+
+  /**
+   * Get equipment failure analysis
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object[]>}
+   */
+  async getEquipmentFailureAnalysis(companyId, companyType, dateRange = {}) {
+    throw new Error('Method getEquipmentFailureAnalysis must be implemented');
+  }
+
+  /**
+   * Get service requests with pagination
+   * @param {Object} options - Pagination options
+   * @returns {Promise<Object>} Service requests with pagination info
+   */
+  async findWithPagination(options = {}) {
+    throw new Error('Method findWithPagination must be implemented');
+  }
+
+  /**
+   * Get overdue service requests
+   * @param {number} companyId - Company ID
+   * @param {string} companyType - 'CLIENT' or 'PROVIDER'
+   * @returns {Promise<ServiceRequest[]>}
+   */
+  async findOverdue(companyId, companyType) {
+    throw new Error('Method findOverdue must be implemented');
   }
 }
 

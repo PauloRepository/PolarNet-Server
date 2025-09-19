@@ -1,191 +1,156 @@
 /**
- * Company Repository Interface
- * Define el contrato para la persistencia de empresas
+ * Repository Interface: Company
+ * Defines the contract for company data persistence
  */
 class ICompanyRepository {
-  
   /**
-   * Busca una empresa por su ID
-   * @param {string} companyId 
+   * Find company by ID
+   * @param {number} id - Company ID
    * @returns {Promise<Company|null>}
    */
-  async findById(companyId) {
-    throw new Error('Method not implemented');
+  async findById(id) {
+    throw new Error('Method findById must be implemented');
   }
 
   /**
-   * Busca empresas por tipo
-   * @param {string} type - 'PROVIDER' | 'CLIENT'
-   * @returns {Promise<Company[]>}
-   */
-  async findByType(type) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresa por email
-   * @param {string} email 
+   * Find company by email
+   * @param {string} email - Company email
    * @returns {Promise<Company|null>}
    */
   async findByEmail(email) {
-    throw new Error('Method not implemented');
+    throw new Error('Method findByEmail must be implemented');
   }
 
   /**
-   * Busca empresa por tax ID
-   * @param {string} taxId 
-   * @returns {Promise<Company|null>}
-   */
-  async findByTaxId(taxId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresas activas
-   * @param {string} type - Opcional: filtrar por tipo
+   * Find companies by type
+   * @param {string} type - Company type ('CLIENT' or 'PROVIDER')
+   * @param {Object} filters - Additional filters
    * @returns {Promise<Company[]>}
    */
-  async findActiveCompanies(type = null) {
-    throw new Error('Method not implemented');
+  async findByType(type, filters = {}) {
+    throw new Error('Method findByType must be implemented');
   }
 
   /**
-   * Busca clientes de un proveedor
-   * @param {string} providerCompanyId 
+   * Get all active companies
+   * @param {Object} filters - Filtering options
    * @returns {Promise<Company[]>}
    */
-  async findClientsByProvider(providerCompanyId) {
-    throw new Error('Method not implemented');
+  async findActive(filters = {}) {
+    throw new Error('Method findActive must be implemented');
   }
 
   /**
-   * Busca empresas por ubicación
-   * @param {Object} location - { city, state, country }
-   * @returns {Promise<Company[]>}
-   */
-  async findByLocation(location) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresas por especialización
-   * @param {string} specialization 
-   * @returns {Promise<Company[]>}
-   */
-  async findBySpecialization(specialization) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Guarda una empresa (crear o actualizar)
-   * @param {Company} company 
+   * Create new company
+   * @param {Object} companyData - Company data
    * @returns {Promise<Company>}
    */
-  async save(company) {
-    throw new Error('Method not implemented');
+  async create(companyData) {
+    throw new Error('Method create must be implemented');
   }
 
   /**
-   * Elimina una empresa
-   * @param {string} companyId 
+   * Update company
+   * @param {number} id - Company ID
+   * @param {Object} updateData - Update data
+   * @returns {Promise<Company>}
+   */
+  async update(id, updateData) {
+    throw new Error('Method update must be implemented');
+  }
+
+  /**
+   * Delete company (soft delete)
+   * @param {number} id - Company ID
    * @returns {Promise<boolean>}
    */
-  async delete(companyId) {
-    throw new Error('Method not implemented');
+  async delete(id) {
+    throw new Error('Method delete must be implemented');
   }
 
   /**
-   * Cuenta empresas por criterios
-   * @param {Object} criteria 
-   * @returns {Promise<number>}
-   */
-  async count(criteria = {}) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresas con paginación
-   * @param {Object} params - { page, limit, filters }
-   * @returns {Promise<{companies: Company[], total: number}>}
-   */
-  async findWithPagination(params) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresas por texto (nombre, descripción, etc.)
-   * @param {string} searchText 
-   * @param {string} type - Opcional: filtrar por tipo
-   * @returns {Promise<Company[]>}
-   */
-  async searchByText(searchText, type = null) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Activa una empresa
-   * @param {string} companyId 
-   * @returns {Promise<Company>}
-   */
-  async activate(companyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Desactiva una empresa
-   * @param {string} companyId 
-   * @returns {Promise<Company>}
-   */
-  async deactivate(companyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Actualiza información de contacto
-   * @param {string} companyId 
-   * @param {Object} contactInfo 
-   * @returns {Promise<Company>}
-   */
-  async updateContactInfo(companyId, contactInfo) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Obtiene estadísticas de la empresa
-   * @param {string} companyId 
+   * Get company statistics
+   * @param {number} companyId - Company ID
    * @returns {Promise<Object>}
    */
-  async getCompanyStats(companyId) {
-    throw new Error('Method not implemented');
+  async getStatistics(companyId) {
+    throw new Error('Method getStatistics must be implemented');
   }
 
   /**
-   * Obtiene top empresas por revenue (para proveedores)
-   * @param {number} limit 
-   * @param {Date} startDate 
-   * @param {Date} endDate 
-   * @returns {Promise<Array>}
-   */
-  async getTopCompaniesByRevenue(limit = 10, startDate, endDate) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Verifica si una empresa existe
-   * @param {string} companyId 
-   * @returns {Promise<boolean>}
-   */
-  async exists(companyId) {
-    throw new Error('Method not implemented');
-  }
-
-  /**
-   * Busca empresas que no han tenido actividad
-   * @param {number} days - Días sin actividad
+   * Search companies
+   * @param {string} query - Search query
+   * @param {Object} filters - Additional filters
    * @returns {Promise<Company[]>}
    */
-  async findInactiveCompanies(days = 90) {
-    throw new Error('Method not implemented');
+  async search(query, filters = {}) {
+    throw new Error('Method search must be implemented');
+  }
+
+  /**
+   * Get companies count by type
+   * @param {string} type - Company type
+   * @returns {Promise<number>}
+   */
+  async getCountByType(type) {
+    throw new Error('Method getCountByType must be implemented');
+  }
+
+  /**
+   * Get recently registered companies
+   * @param {number} limit - Number of companies to return
+   * @returns {Promise<Company[]>}
+   */
+  async getRecentlyRegistered(limit = 10) {
+    throw new Error('Method getRecentlyRegistered must be implemented');
+  }
+
+  /**
+   * Check if company email exists
+   * @param {string} email - Email to check
+   * @param {number} excludeId - Company ID to exclude from check
+   * @returns {Promise<boolean>}
+   */
+  async emailExists(email, excludeId = null) {
+    throw new Error('Method emailExists must be implemented');
+  }
+
+  /**
+   * Get companies with pagination
+   * @param {Object} options - Pagination options
+   * @returns {Promise<Object>} Companies with pagination info
+   */
+  async findWithPagination(options = {}) {
+    throw new Error('Method findWithPagination must be implemented');
+  }
+
+  /**
+   * Get company revenue summary (for providers)
+   * @param {number} companyId - Provider company ID
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object>}
+   */
+  async getRevenueSummary(companyId, dateRange = {}) {
+    throw new Error('Method getRevenueSummary must be implemented');
+  }
+
+  /**
+   * Get company rental summary (for clients)
+   * @param {number} companyId - Client company ID
+   * @param {Object} dateRange - Date range filters
+   * @returns {Promise<Object>}
+   */
+  async getRentalSummary(companyId, dateRange = {}) {
+    throw new Error('Method getRentalSummary must be implemented');
+  }
+
+  /**
+   * Get company activity summary
+   * @param {number} companyId - Company ID
+   * @returns {Promise<Object>}
+   */
+  async getActivitySummary(companyId) {
+    throw new Error('Method getActivitySummary must be implemented');
   }
 }
 

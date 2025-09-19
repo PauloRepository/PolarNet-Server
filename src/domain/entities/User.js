@@ -1,223 +1,270 @@
 /**
- * User Entity
- * Representa un usuario del sistema
+ * Domain Entity: User
+ * Represents a user in the system
  */
 class User {
   constructor({
-    userId,
-    name,
-    username,
-    password,
-    email,
-    phone,
-    role, // 'ADMIN' | 'PROVIDER' | 'CLIENT'
+    id,
     companyId,
-    isActive,
+    firstName,
+    lastName,
+    email,
+    password,
+    phone,
+    role, // 'ADMIN', 'CLIENT', 'PROVIDER'
+    isActive = true,
+    isAdmin = false,
     lastLogin,
     createdAt,
     updatedAt
   }) {
-    this.userId = userId;
-    this.name = name;
-    this.username = username;
-    this.password = password;
+    this.id = id;
+    this.companyId = companyId;
+    this.firstName = firstName;
+    this.lastName = lastName;
     this.email = email;
+    this.password = password;
     this.phone = phone;
     this.role = role;
-    this.companyId = companyId;
     this.isActive = isActive;
+    this.isAdmin = isAdmin;
     this.lastLogin = lastLogin;
-    this.createdAt = createdAt;
-    this.updatedAt = updatedAt;
-
-    this.validate();
+    this.createdAt = createdAt || new Date();
+    this.updatedAt = updatedAt || new Date();
   }
 
+  /**
+   * Validate user data
+   * @returns {Object} Validation result
+   */
   validate() {
-    if (!this.name || this.name.trim().length === 0) {
-      throw new Error('User name is required');
+    const errors = [];
+
+    if (!this.firstName || this.firstName.trim().length < 2) {
+      errors.push('First name must be at least 2 characters');
     }
 
-    if (!this.username || this.username.trim().length === 0) {
-      throw new Error('Username is required');
+    if (!this.lastName || this.lastName.trim().length < 2) {
+      errors.push('Last name must be at least 2 characters');
     }
 
     if (!this.email || !this.isValidEmail(this.email)) {
-      throw new Error('Valid email is required');
+      errors.push('Valid email is required');
     }
 
-    if (!this.role || !['ADMIN', 'PROVIDER', 'CLIENT'].includes(this.role)) {
-      throw new Error('Invalid user role');
+    if (!['ADMIN', 'CLIENT', 'PROVIDER'].includes(this.role)) {
+      errors.push('Role must be ADMIN, CLIENT, or PROVIDER');
     }
 
-    if (!this.companyId) {
-      throw new Error('Company ID is required');
+    if (this.phone && !this.isValidPhone(this.phone)) {
+      errors.push('Invalid phone number format');
     }
 
-    if (this.username.length < 3) {
-      throw new Error('Username must be at least 3 characters long');
+    if (!this.companyId && this.role !== 'ADMIN') {
+      errors.push('Company ID is required for non-admin users');
     }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
   }
 
-  isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+  /**
+   * Get full name
+   * @returns {string}
+   */
+  getFullName() {
+    return `${this.firstName} ${this.lastName}`.trim();
   }
 
-  isAdmin() {
-    return this.role === 'ADMIN';
+  /**
+   * Check if user is admin
+   * @returns {boolean}
+   */
+  isAdminUser() {
+    return this.role === 'ADMIN' || this.isAdmin;
   }
 
-  isProvider() {
-    return this.role === 'PROVIDER';
-  }
-
-  isClient() {
+  /**
+   * Check if user is client
+   * @returns {boolean}
+   */
+  isClientUser() {
     return this.role === 'CLIENT';
   }
 
-  isActiveUser() {
-    return this.isActive === true;
+  /**
+   * Check if user is provider
+   * @returns {boolean}
+   */
+  isProviderUser() {
+    return this.role === 'PROVIDER';
   }
 
-  activate() {
-    this.isActive = true;
-    this.updatedAt = new Date();
-  }
-
-  deactivate() {
-    this.isActive = false;
-    this.updatedAt = new Date();
-  }
-
-  updateProfile({ name, email, phone }) {
-    if (name) {
-      if (name.trim().length === 0) {
-        throw new Error('Name cannot be empty');
+  /**
+   * Update user information
+   * @param {Object} updateData - Data to update
+   */
+  update(updateData) {
+    const allowedFields = ['firstName', 'lastName', 'email', 'phone'];
+    
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        this[field] = updateData[field];
       }
-      this.name = name.trim();
-    }
-
-    if (email) {
-      if (!this.isValidEmail(email)) {
-        throw new Error('Invalid email format');
-      }
-      this.email = email.toLowerCase();
-    }
-
-    if (phone) {
-      this.phone = phone;
-    }
+    });
 
     this.updatedAt = new Date();
   }
 
-  changePassword(newPassword) {
-    if (!newPassword || newPassword.length < 6) {
-      throw new Error('Password must be at least 6 characters long');
-    }
-
-    this.password = newPassword; // En la implementación real esto debe ser hasheado
-    this.updatedAt = new Date();
-  }
-
+  /**
+   * Update last login timestamp
+   */
   updateLastLogin() {
     this.lastLogin = new Date();
     this.updatedAt = new Date();
   }
 
-  changeRole(newRole) {
-    if (!['ADMIN', 'PROVIDER', 'CLIENT'].includes(newRole)) {
-      throw new Error('Invalid role');
-    }
-
-    this.role = newRole;
+  /**
+   * Deactivate user
+   */
+  deactivate() {
+    this.isActive = false;
     this.updatedAt = new Date();
   }
 
-  hasPermission(permission) {
-    // Define permissions based on role
-    const permissions = {
-      'ADMIN': [
-        'manage_users',
-        'manage_companies',
-        'view_all_data',
-        'system_admin'
-      ],
-      'PROVIDER': [
-        'manage_equipments',
-        'manage_rentals',
-        'manage_maintenances',
-        'view_client_data',
-        'manage_service_requests'
-      ],
-      'CLIENT': [
-        'view_own_equipments',
-        'create_service_requests',
-        'view_own_contracts',
-        'view_own_invoices'
-      ]
-    };
-
-    return permissions[this.role]?.includes(permission) || false;
+  /**
+   * Activate user
+   */
+  activate() {
+    this.isActive = true;
+    this.updatedAt = new Date();
   }
 
-  canAccessCompany(companyId) {
-    // Admins can access any company
-    if (this.isAdmin()) {
+  /**
+   * Set admin privileges
+   * @param {boolean} isAdmin - Admin status
+   */
+  setAdminPrivileges(isAdmin) {
+    this.isAdmin = isAdmin;
+    this.updatedAt = new Date();
+  }
+
+  /**
+   * Validate email format
+   * @param {string} email - Email to validate
+   * @returns {boolean}
+   */
+  isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  /**
+   * Validate phone format
+   * @param {string} phone - Phone to validate
+   * @returns {boolean}
+   */
+  isValidPhone(phone) {
+    const phoneRegex = /^\+?[\d\s\-\(\)]{10,}$/;
+    return phoneRegex.test(phone);
+  }
+
+  /**
+   * Check if user can access resource
+   * @param {string} resourceType - Type of resource
+   * @param {number} resourceCompanyId - Company ID of resource
+   * @returns {boolean}
+   */
+  canAccessResource(resourceType, resourceCompanyId) {
+    if (this.role === 'ADMIN') {
       return true;
     }
 
-    // Regular users can only access their own company
-    return this.companyId === companyId;
+    return this.companyId === resourceCompanyId;
   }
 
-  canManageUser(targetUserId, targetUserCompanyId) {
-    // Admins can manage any user
-    if (this.isAdmin()) {
-      return true;
-    }
-
-    // Users cannot manage themselves for certain operations
-    if (this.userId === targetUserId) {
-      return false;
-    }
-
-    // Providers can manage users in their company
-    if (this.isProvider() && this.companyId === targetUserCompanyId) {
-      return true;
-    }
-
-    return false;
-  }
-
-  getDisplayName() {
-    return this.name || this.username;
-  }
-
-  getInitials() {
-    const names = this.name.split(' ');
-    if (names.length >= 2) {
-      return `${names[0].charAt(0)}${names[1].charAt(0)}`.toUpperCase();
-    }
-    return this.name.charAt(0).toUpperCase();
-  }
-
-  isDormant() {
-    if (!this.lastLogin) {
-      return true;
-    }
-
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  /**
+   * Get user permissions based on role
+   * @returns {Array} Array of permissions
+   */
+  getPermissions() {
+    const basePermissions = ['read_profile', 'update_profile'];
     
-    return new Date(this.lastLogin) < thirtyDaysAgo;
+    switch (this.role) {
+      case 'ADMIN':
+        return [...basePermissions, 'admin_all', 'manage_companies', 'manage_users'];
+      
+      case 'CLIENT':
+        const clientPermissions = [
+          ...basePermissions,
+          'view_equipment',
+          'create_service_request',
+          'view_contracts',
+          'view_invoices'
+        ];
+        
+        if (this.isAdmin) {
+          clientPermissions.push('manage_company_users', 'update_company_profile');
+        }
+        
+        return clientPermissions;
+      
+      case 'PROVIDER':
+        const providerPermissions = [
+          ...basePermissions,
+          'manage_equipment',
+          'manage_service_requests',
+          'manage_contracts',
+          'manage_invoices'
+        ];
+        
+        if (this.isAdmin) {
+          providerPermissions.push('manage_company_users', 'update_company_profile');
+        }
+        
+        return providerPermissions;
+      
+      default:
+        return basePermissions;
+    }
   }
 
-  toSafeObject() {
-    // Return user object without sensitive information
-    const { password, ...safeUser } = this;
-    return safeUser;
+  /**
+   * Convert to plain object (excluding password)
+   * @returns {Object}
+   */
+  toJSON() {
+    return {
+      id: this.id,
+      companyId: this.companyId,
+      firstName: this.firstName,
+      lastName: this.lastName,
+      email: this.email,
+      phone: this.phone,
+      role: this.role,
+      isActive: this.isActive,
+      isAdmin: this.isAdmin,
+      lastLogin: this.lastLogin,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt
+    };
+  }
+
+  /**
+   * Convert to safe object for public API
+   * @returns {Object}
+   */
+  toSafeJSON() {
+    return {
+      id: this.id,
+      firstName: this.firstName,
+      lastName: this.lastName,
+      email: this.email,
+      role: this.role,
+      isActive: this.isActive
+    };
   }
 }
 
