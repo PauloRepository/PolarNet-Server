@@ -375,7 +375,7 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
     try {
       const allowedFields = [
         'due_date', 'subtotal', 'tax_amount', 'total_amount', 'status',
-        'payment_method', 'line_items', 'notes', 'paid_date', 'payment_reference'
+        'payment_method', 'line_items', 'notes', 'paid_date'
       ];
       const updateFields = [];
       const params = [];
@@ -464,16 +464,14 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
         SET status = 'PAID',
             paid_date = $1,
             payment_method = $2,
-            payment_reference = $3,
-            updated_at = $4
-  WHERE invoice_id = $5
+            updated_at = $3
+  WHERE invoice_id = $4
   RETURNING invoice_id
       `;
 
       const result = await this.db.query(query, [
         paymentData.paidDate || new Date(),
         paymentData.paymentMethod,
-        paymentData.paymentReference,
         new Date(),
         invoiceId
       ]);
@@ -700,6 +698,141 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
     return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
   }
 
+  // =====================================
+  // MISSING METHODS ADDED FOR CLIENT INVOICES
+  // =====================================
+
+  /**
+   * Count invoices by client company (MISSING METHOD)
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<number>}
+   */
+  async countByClientCompany(clientCompanyId, filters = {}) {
+    try {
+      let query = `
+        SELECT COUNT(*) as count
+        FROM invoices i
+        LEFT JOIN active_rentals ar ON i.rental_id = ar.rental_id
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        WHERE i.client_company_id = $1
+      `;
+      
+      const params = [clientCompanyId];
+      let paramCount = 1;
+
+      if (filters.status) {
+        paramCount++;
+        query += ` AND i.status = $${paramCount}`;
+        params.push(filters.status);
+      }
+
+      if (filters.dateFrom) {
+        paramCount++;
+        query += ` AND i.issue_date >= $${paramCount}`;
+        params.push(filters.dateFrom);
+      }
+
+      if (filters.dateTo) {
+        paramCount++;
+        query += ` AND i.issue_date <= $${paramCount}`;
+        params.push(filters.dateTo);
+      }
+
+      const result = await this.db.query(query, params);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.countByClientCompany:', error);
+      throw new Error(`Failed to count invoices by client company: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get client summary (MISSING METHOD - ALIAS)
+   * @param {number} clientCompanyId - Client company ID
+   * @returns {Promise<Object>}
+   */
+  async getClientSummary(clientCompanyId) {
+    return await this.getClientPaymentSummary(clientCompanyId);
+  }
+
+  /**
+   * Get client payment history (MISSING METHOD)
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<Object[]>}
+   */
+  async getClientPaymentHistory(clientCompanyId, filters = {}) {
+    try {
+      const query = `
+        SELECT 
+          i.invoice_id,
+          i.invoice_number,
+          i.total_amount as amount,
+          i.paid_date as payment_date,
+          i.payment_method,
+          i.issue_date,
+          i.due_date,
+          i.status,
+          ar.rental_id,
+          ar.equipment_id,
+          e.serial_number,
+          e.type as equipment_type,
+          e.manufacturer,
+          e.model
+        FROM invoices i
+        LEFT JOIN active_rentals ar ON i.rental_id = ar.rental_id
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        WHERE i.client_company_id = $1 
+          AND i.status = 'PAID'
+          AND i.paid_date IS NOT NULL
+        ORDER BY i.paid_date DESC
+        LIMIT ${filters.limit || 50}
+      `;
+      
+      const result = await this.db.query(query, [clientCompanyId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.getClientPaymentHistory:', error);
+      throw new Error(`Failed to get client payment history: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get payment history for specific invoice or rental (MISSING METHOD)
+   * @param {number} invoiceOrRentalId - Invoice ID or Rental ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<Object[]>}
+   */
+  async getPaymentHistory(invoiceOrRentalId, filters = {}) {
+    try {
+      const query = `
+        SELECT 
+          i.invoice_id as id,
+          i.invoice_number,
+          i.total_amount as amount,
+          i.paid_date as payment_date,
+          i.payment_method,
+          i.issue_date,
+          i.due_date,
+          i.status,
+          i.notes
+        FROM invoices i
+        WHERE (i.invoice_id = $1 OR i.rental_id = $1)
+          AND i.status = 'PAID'
+          AND i.paid_date IS NOT NULL
+        ORDER BY i.paid_date DESC
+        LIMIT ${filters.limit || 20}
+      `;
+      
+      const result = await this.db.query(query, [invoiceOrRentalId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.getPaymentHistory:', error);
+      throw new Error(`Failed to get payment history: ${error.message}`);
+    }
+  }
+
   /**
    * Map database row to Invoice entity
    * @param {Object} row - Database row
@@ -722,7 +855,6 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
       lineItems: typeof row.line_items === 'string' ? JSON.parse(row.line_items) : row.line_items,
       notes: row.notes,
       paidDate: row.paid_date,
-      paymentReference: row.payment_reference,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     });

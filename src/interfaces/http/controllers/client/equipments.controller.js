@@ -1,18 +1,20 @@
+/**
+ * Controller: Client Equipments Management
+ * Handles CLIENT equipment operations using DDD architecture
+ */
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
-class EquipmentsController {
-  constructor() {
-    this.container = null;
-    this.logger = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+class ClientEquipmentsController {
+  constructor(container) {
     this.container = container;
+    this.equipmentsUseCase = container.resolve('getClientEquipments');
     this.logger = container.resolve('logger');
   }
 
-  // GET /api/client/equipments - Obtener equipos rentados usando DDD
+  /**
+   * Get client equipments
+   * GET /api/client/equipments
+   */
   async getEquipments(req, res) {
     try {
       const { clientCompanyId } = req.user;
@@ -533,4 +535,4 @@ class EquipmentsController {
   }
 }
 
-module.exports = new EquipmentsController();
+module.exports = ClientEquipmentsController;

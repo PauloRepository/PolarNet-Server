@@ -1,13 +1,7 @@
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
 class ProfileController {
-  constructor() {
-    this.container = null;
-    this.logger = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+  constructor(container) {
     this.container = container;
     this.logger = container.resolve('logger');
   }
@@ -576,4 +570,4 @@ class ProfileController {
   }
 }
 
-module.exports = new ProfileController();
+module.exports = ProfileController;

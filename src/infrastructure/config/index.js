@@ -12,14 +12,7 @@ const PostgreSQLServiceRequestRepository = require('../persistence/PostgreSQLSer
 const PostgreSQLInvoiceRepository = require('../persistence/PostgreSQLInvoiceRepository');
 const PostgreSQLTemperatureReadingRepository = require('../persistence/PostgreSQLTemperatureReadingRepository');
 const PostgreSQLEquipmentLocationRepository = require('../persistence/PostgreSQLEquipmentLocationRepository');
-
-// Maintenance repository is optional depending on migration state — require guard
-let PostgreSQLMaintenanceRepository = null;
-try {
-  PostgreSQLMaintenanceRepository = require('../persistence/PostgreSQLMaintenanceRepository');
-} catch (err) {
-  // Module may not exist in some branches; we'll register conditionally below.
-}
+const PostgreSQLMaintenanceRepository = require('../persistence/PostgreSQLMaintenanceRepository');
 
 // Application - Use Cases CLIENT
 const GetClientDashboard = require('../../application/use-cases/ClientDashboardUseCase');
@@ -28,6 +21,15 @@ const ClientServiceRequestUseCase = require('../../application/use-cases/ClientS
 const ClientProfileUseCase = require('../../application/use-cases/ClientProfileUseCase');
 const ClientInvoiceUseCase = require('../../application/use-cases/ClientInvoiceUseCase');
 const ClientContractUseCase = require('../../application/use-cases/ClientContractUseCase');
+
+// Application - Use Cases PROVIDER
+const GetProviderDashboard = require('../../application/use-cases/ProviderDashboardUseCase');
+const ProviderEquipmentUseCase = require('../../application/use-cases/ProviderEquipmentUseCase');
+const ProviderClientsUseCase = require('../../application/use-cases/ProviderClientsUseCase');
+const ProviderRentalsUseCase = require('../../application/use-cases/ProviderRentalsUseCase');
+const ProviderMaintenanceUseCase = require('../../application/use-cases/ProviderMaintenanceUseCase');
+const ProviderServiceRequestUseCase = require('../../application/use-cases/ProviderServiceRequestUseCase');
+const ProviderProfileUseCase = require('../../application/use-cases/ProviderProfileUseCase');
 
 /**
  * Configure and setup the Dependency Injection Container
@@ -109,10 +111,12 @@ function configureDI() {
   }
 
   // =====================================================
-  // APPLICATION LAYER - CLIENT Use Cases
+  // APPLICATION LAYER - USE CASES
   // =====================================================
 
-  // Get Client Dashboard Use Case
+  // ===== CLIENT USE CASES =====
+
+  // Client Dashboard Use Case
   container.register('getClientDashboard', (
     activeRentalRepository,
     serviceRequestRepository,
@@ -135,7 +139,7 @@ function configureDI() {
     'equipmentLocationRepository'
   ]);
 
-  // Get Client Equipments Use Case
+  // Client Equipments Use Case
   container.register('getClientEquipments', (
     equipmentRepository,
     activeRentalRepository,
@@ -152,7 +156,7 @@ function configureDI() {
     'temperatureReadingRepository'
   ]);
 
-  // Client Service Request Use Case
+  // Client Service Request Use Case (legacy name)
   container.register('createServiceRequest', (
     serviceRequestRepository,
     equipmentRepository,
@@ -172,7 +176,7 @@ function configureDI() {
     'userRepository'
   ]);
 
-  // Also register as clientServiceRequestUseCase for controllers
+  // Client Service Request Use Case (modern name)
   container.register('clientServiceRequestUseCase', (
     serviceRequestRepository,
     equipmentRepository,
@@ -192,7 +196,7 @@ function configureDI() {
     'userRepository'
   ]);
 
-  // Client Profile Use Case
+  // Client Profile Use Case (legacy name)
   container.register('updateClientProfile', (
     userRepository,
     companyRepository
@@ -206,47 +210,374 @@ function configureDI() {
     'companyRepository'
   ]);
 
+  // Client Profile Use Case (modern name)
+  container.register('clientProfileUseCase', (
+    userRepository,
+    companyRepository
+  ) => {
+    return new ClientProfileUseCase(
+      userRepository,
+      companyRepository
+    );
+  }, [
+    'userRepository',
+    'companyRepository'
+  ]);
+
+  // Client Invoice Use Case
+  container.register('clientInvoiceUseCase', (
+    invoiceRepository,
+    activeRentalRepository,
+    companyRepository
+  ) => {
+    return new ClientInvoiceUseCase(
+      invoiceRepository,
+      activeRentalRepository,
+      companyRepository
+    );
+  }, [
+    'invoiceRepository',
+    'activeRentalRepository',
+    'companyRepository'
+  ]);
+
+  // Client Contract Use Case
+  container.register('clientContractUseCase', (
+    activeRentalRepository,
+    equipmentRepository,
+    companyRepository,
+    userRepository
+  ) => {
+    return new ClientContractUseCase(
+      activeRentalRepository,
+      equipmentRepository,
+      companyRepository,
+      userRepository
+    );
+  }, [
+    'activeRentalRepository',
+    'equipmentRepository',
+    'companyRepository',
+    'userRepository'
+  ]);
+
+  // ===== PROVIDER USE CASES =====
+
+  // Provider Dashboard Use Case (legacy version)
+  container.register('getProviderDashboard', (
+    activeRentalRepository,
+    equipmentRepository,
+    serviceRequestRepository,
+    invoiceRepository,
+    temperatureReadingRepository,
+    equipmentLocationRepository
+  ) => {
+    return new GetProviderDashboard(
+      activeRentalRepository,
+      equipmentRepository,
+      serviceRequestRepository,
+      invoiceRepository,
+      temperatureReadingRepository,
+      equipmentLocationRepository
+    );
+  }, [
+    'activeRentalRepository',
+    'equipmentRepository',
+    'serviceRequestRepository',
+    'invoiceRepository',
+    'temperatureReadingRepository',
+    'equipmentLocationRepository'
+  ]);
+
+  // Provider Dashboard Use Case (modern version for controllers)
+  container.register('providerDashboardUseCase', (
+    activeRentalRepository,
+    equipmentRepository,
+    serviceRequestRepository,
+    invoiceRepository,
+    temperatureReadingRepository,
+    equipmentLocationRepository
+  ) => {
+    return new GetProviderDashboard(
+      activeRentalRepository,
+      equipmentRepository,
+      serviceRequestRepository,
+      invoiceRepository,
+      temperatureReadingRepository,
+      equipmentLocationRepository
+    );
+  }, [
+    'activeRentalRepository',
+    'equipmentRepository',
+    'serviceRequestRepository',
+    'invoiceRepository',
+    'temperatureReadingRepository',
+    'equipmentLocationRepository'
+  ]);
+
+  // Provider Equipment Use Case
+  container.register('providerEquipmentUseCase', (
+    equipmentRepository,
+    activeRentalRepository,
+    temperatureReadingRepository,
+    equipmentLocationRepository,
+    serviceRequestRepository
+  ) => {
+    return new ProviderEquipmentUseCase(
+      equipmentRepository,
+      activeRentalRepository,
+      temperatureReadingRepository,
+      equipmentLocationRepository,
+      serviceRequestRepository
+    );
+  }, [
+    'equipmentRepository',
+    'activeRentalRepository',
+    'temperatureReadingRepository',
+    'equipmentLocationRepository',
+    'serviceRequestRepository'
+  ]);
+
+  // Provider Clients Use Case
+  container.register('providerClientsUseCase', (
+    companyRepository,
+    activeRentalRepository,
+    serviceRequestRepository,
+    invoiceRepository,
+    userRepository
+  ) => {
+    return new ProviderClientsUseCase(
+      companyRepository,
+      activeRentalRepository,
+      serviceRequestRepository,
+      invoiceRepository,
+      userRepository
+    );
+  }, [
+    'companyRepository',
+    'activeRentalRepository',
+    'serviceRequestRepository',
+    'invoiceRepository',
+    'userRepository'
+  ]);
+
+  // Provider Rentals Use Case
+  container.register('providerRentalsUseCase', (
+    activeRentalRepository,
+    equipmentRepository,
+    companyRepository,
+    invoiceRepository,
+    serviceRequestRepository
+  ) => {
+    return new ProviderRentalsUseCase(
+      activeRentalRepository,
+      equipmentRepository,
+      companyRepository,
+      invoiceRepository,
+      serviceRequestRepository
+    );
+  }, [
+    'activeRentalRepository',
+    'equipmentRepository',
+    'companyRepository',
+    'invoiceRepository',
+    'serviceRequestRepository'
+  ]);
+
+  // Provider Maintenance Use Case
+  container.register('providerMaintenanceUseCase', (
+    maintenanceRepository,
+    equipmentRepository,
+    companyRepository,
+    userRepository
+  ) => {
+    return new ProviderMaintenanceUseCase(
+      maintenanceRepository,
+      equipmentRepository,
+      companyRepository,
+      userRepository
+    );
+  }, [
+    'maintenanceRepository',
+    'equipmentRepository',
+    'companyRepository',
+    'userRepository'
+  ]);
+
+  // Provider Service Request Use Case
+  container.register('providerServiceRequestUseCase', (
+    serviceRequestRepository,
+    equipmentRepository,
+    companyRepository,
+    userRepository
+  ) => {
+    return new ProviderServiceRequestUseCase(
+      serviceRequestRepository,
+      equipmentRepository,
+      companyRepository,
+      userRepository,
+      null // notificationService - can be injected later
+    );
+  }, [
+    'serviceRequestRepository',
+    'equipmentRepository',
+    'companyRepository',
+    'userRepository'
+  ]);
+
+  // Provider Profile Use Case
+  container.register('providerProfileUseCase', (
+    userRepository,
+    companyRepository
+  ) => {
+    return new ProviderProfileUseCase(
+      userRepository,
+      companyRepository,
+      null, // settingsRepository - can be injected later
+      null, // statisticsRepository - can be injected later
+      null  // fileUploadService - can be injected later
+    );
+  }, [
+    'userRepository',
+    'companyRepository'
+  ]);
+
+  // =====================================================
+  // APPLICATION LAYER - DTOs (Response Data Transfer Objects)
+  // =====================================================
+
+  // ===== CLIENT RESPONSE DTOs =====
+  container.registerSingleton('ClientDashboardResponseDTO', () => {
+    return require('../../application/dto/ClientDashboardResponseDTO');
+  });
+
+  container.registerSingleton('ClientEquipmentResponseDTO', () => {
+    return require('../../application/dto/ClientEquipmentResponseDTO');
+  });
+
+  container.registerSingleton('ClientServiceRequestResponseDTO', () => {
+    return require('../../application/dto/ClientServiceRequestResponseDTO');
+  });
+
+  container.registerSingleton('ClientProfileResponseDTO', () => {
+    return require('../../application/dto/ClientProfileResponseDTO');
+  });
+
+  container.registerSingleton('ClientInvoiceResponseDTO', () => {
+    return require('../../application/dto/ClientInvoiceResponseDTO');
+  });
+
+  container.registerSingleton('ClientContractResponseDTO', () => {
+    return require('../../application/dto/ClientContractResponseDTO');
+  });
+
+  // ===== PROVIDER RESPONSE DTOs =====
+  container.registerSingleton('ProviderDashboardResponseDTO', () => {
+    return require('../../application/dto/ProviderDashboardResponseDTO');
+  });
+
+  container.registerSingleton('ProviderEquipmentResponseDTO', () => {
+    return require('../../application/dto/ProviderEquipmentResponseDTO');
+  });
+
+  container.registerSingleton('ProviderClientResponseDTO', () => {
+    return require('../../application/dto/ProviderClientResponseDTO');
+  });
+
+  container.registerSingleton('ProviderRentalResponseDTO', () => {
+    return require('../../application/dto/ProviderRentalResponseDTO');
+  });
+
+  container.registerSingleton('ProviderMaintenanceResponseDTO', () => {
+    return require('../../application/dto/ProviderMaintenanceResponseDTO');
+  });
+
+  container.registerSingleton('ProviderServiceRequestResponseDTO', () => {
+    return require('../../application/dto/ProviderServiceRequestResponseDTO');
+  });
+
+  container.registerSingleton('ProviderProfileResponseDTO', () => {
+    return require('../../application/dto/ProviderProfileResponseDTO');
+  });
+
   // =====================================================
   // INTERFACE LAYER - Controllers  
   // =====================================================
 
-  // Auth Controller (legacy - not yet modernized with DDD)
+  // ===== AUTH & ADMIN CONTROLLERS (Legacy Pattern) =====
   container.registerSingleton('authController', () => {
     return require('../../interfaces/http/controllers/auth/auth.controller');
   });
 
-  // Admin Controller (legacy - not yet modernized with DDD)
   container.registerSingleton('adminController', () => {
     return require('../../interfaces/http/controllers/admin/admin.controller');
   });
 
-  // Provider Controllers (legacy - not yet modernized with DDD)
-  container.registerSingleton('providerClientsController', () => {
-    return require('../../interfaces/http/controllers/provider/clients.controller');
+  // ===== CLIENT CONTROLLERS (DDD Architecture with Dependency Injection) =====
+  container.registerSingleton('clientDashboardController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/dashboard.controller');
+    return new ControllerClass(container);
   });
 
+  container.registerSingleton('clientEquipmentsController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/equipments.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('clientServiceRequestsController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/serviceRequests.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('clientProfileController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/profile.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('clientInvoicesController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/invoices.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('clientContractsController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/client/contracts.controller');
+    return new ControllerClass(container);
+  });
+
+  // ===== PROVIDER CONTROLLERS (DDD Architecture with Dependency Injection) =====
   container.registerSingleton('providerDashboardController', () => {
-    return require('../../interfaces/http/controllers/provider/dashboard.controller');
+    const ControllerClass = require('../../interfaces/http/controllers/provider/dashboard.controller');
+    return new ControllerClass(container);
   });
 
   container.registerSingleton('providerEquipmentsController', () => {
-    return require('../../interfaces/http/controllers/provider/equipments.controller');
+    const ControllerClass = require('../../interfaces/http/controllers/provider/equipments.controller');
+    return new ControllerClass(container);
   });
 
-  container.registerSingleton('providerMaintenancesController', () => {
-    return require('../../interfaces/http/controllers/provider/maintenances.controller');
-  });
-
-  container.registerSingleton('providerProfileController', () => {
-    return require('../../interfaces/http/controllers/provider/profile.controller');
+  container.registerSingleton('providerClientsController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/provider/clients.controller');
+    return new ControllerClass(container);
   });
 
   container.registerSingleton('providerRentalsController', () => {
-    return require('../../interfaces/http/controllers/provider/rentals.controller');
+    const ControllerClass = require('../../interfaces/http/controllers/provider/rentals.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('providerMaintenancesController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/provider/maintenances.controller');
+    return new ControllerClass(container);
   });
 
   container.registerSingleton('providerServiceRequestsController', () => {
-    return require('../../interfaces/http/controllers/provider/serviceRequests.controller');
+    const ControllerClass = require('../../interfaces/http/controllers/provider/serviceRequests.controller');
+    return new ControllerClass(container);
+  });
+
+  container.registerSingleton('providerProfileController', () => {
+    const ControllerClass = require('../../interfaces/http/controllers/provider/profile.controller');
+    return new ControllerClass(container);
   });
 
   // =====================================================

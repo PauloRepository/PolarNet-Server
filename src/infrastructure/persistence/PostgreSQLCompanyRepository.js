@@ -637,6 +637,101 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
   }
 
   /**
+   * Count active clients by provider
+   * @param {number} providerId - Provider company ID
+   * @returns {Promise<number>}
+   */
+  async countActiveByProvider(providerId) {
+    try {
+      const query = `
+        SELECT COUNT(DISTINCT ar.client_company_id) as count
+        FROM active_rentals ar
+        WHERE ar.provider_company_id = $1 AND ar.status = 'ACTIVE'
+      `;
+      
+      const result = await this.db.query(query, [providerId]);
+      return parseInt(result.rows[0].count) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLCompanyRepository.countActiveByProvider:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get client analytics
+   * @param {number} providerId - Provider company ID
+   * @param {Object} filters - Analytics filters
+   * @returns {Promise<Object>}
+   */
+  async getAnalytics(providerId, filters = {}) {
+    try {
+      const { period = '12months', sortBy = 'revenue' } = filters;
+      
+      let intervalClause = '12 months';
+      if (period === '30days') {
+        intervalClause = '30 days';
+      } else if (period === '6months') {
+        intervalClause = '6 months';
+      }
+
+      const query = `
+        SELECT 
+          c.company_id,
+          c.name,
+          c.type,
+          COUNT(DISTINCT ar.rental_id) as rental_count,
+          COALESCE(SUM(ar.monthly_rate), 0) as total_revenue,
+          COALESCE(AVG(ar.monthly_rate), 0) as avg_revenue,
+          COUNT(DISTINCT sr.service_request_id) as service_requests,
+          MIN(ar.start_date) as first_rental_date,
+          MAX(ar.start_date) as last_rental_date
+        FROM companies c
+        LEFT JOIN active_rentals ar ON c.company_id = ar.client_company_id 
+          AND ar.provider_company_id = $1
+          AND ar.start_date >= CURRENT_DATE - INTERVAL '${intervalClause}'
+        LEFT JOIN service_requests sr ON c.company_id = sr.client_company_id 
+          AND sr.provider_company_id = $1
+        WHERE c.type = 'CLIENT' AND c.is_active = true
+        GROUP BY c.company_id, c.name, c.type
+        HAVING COUNT(DISTINCT ar.rental_id) > 0
+        ORDER BY ${sortBy === 'revenue' ? 'total_revenue' : 'rental_count'} DESC
+        LIMIT 50
+      `;
+
+      const result = await this.db.query(query, [providerId]);
+      
+      // Calculate summary metrics
+      const totalClients = result.rows.length;
+      const activeClients = result.rows.filter(row => row.rental_count > 0).length;
+      const newClients = result.rows.filter(row => {
+        const firstRental = new Date(row.first_rental_date);
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        return firstRental >= thirtyDaysAgo;
+      }).length;
+      const totalRevenue = result.rows.reduce((sum, row) => sum + parseFloat(row.total_revenue), 0);
+      const avgRevenuePerClient = totalRevenue / Math.max(activeClients, 1);
+
+      return {
+        clients: result.rows,
+        totalClients,
+        activeClients,
+        newClients,
+        avgRevenuePerClient: Math.round(avgRevenuePerClient * 100) / 100
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLCompanyRepository.getAnalytics:', error);
+      return {
+        clients: [],
+        totalClients: 0,
+        activeClients: 0,
+        newClients: 0,
+        avgRevenuePerClient: 0
+      };
+    }
+  }
+
+  /**
    * Convert camelCase to snake_case
    * @param {string} str - String in camelCase
    * @returns {string} String in snake_case

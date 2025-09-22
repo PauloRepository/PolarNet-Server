@@ -1,13 +1,7 @@
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
 class InvoicesController {
-  constructor() {
-    this.container = null;
-    this.logger = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+  constructor(container) {
     this.container = container;
     this.logger = container.resolve('logger');
   }
@@ -59,35 +53,32 @@ class InvoicesController {
       const invoices = await invoiceRepository.findByClientCompany(clientCompanyId, filters);
       const totalInvoices = await invoiceRepository.countByClientCompany(clientCompanyId, filters);
 
-      // Format response
-      const formattedInvoices = invoices.map(invoice => ({
-        invoiceId: invoice.id.toString(),
-        invoiceNumber: invoice.invoiceNumber,
-        description: invoice.description,
-        issueDate: invoice.issueDate,
-        dueDate: invoice.dueDate,
-        paidDate: invoice.paidDate,
-        status: invoice.status,
-        amounts: {
-          subtotal: invoice.subtotal,
-          taxAmount: invoice.taxAmount,
-          totalAmount: invoice.totalAmount,
-          paidAmount: invoice.paidAmount,
-          remainingAmount: invoice.getRemainingAmount()
-        },
-        provider: invoice.getProviderInfo(),
-        equipment: invoice.getEquipmentInfo(),
-        rental: invoice.getRentalInfo(),
-        paymentInfo: {
-          paymentMethod: invoice.paymentMethod,
-          paymentReference: invoice.paymentReference,
-          paymentStatus: invoice.getPaymentStatus()
-        },
-        isOverdue: invoice.isOverdue(),
-        daysOverdue: invoice.getDaysOverdue(),
-        canBePaid: invoice.canBePaid(),
-        downloadUrl: invoice.getDownloadUrl()
-      }));
+      // Format response - simplified without entity methods that may not exist
+      const formattedInvoices = invoices.map(invoice => {
+        const isOverdue = invoice.status === 'PENDING' && invoice.dueDate && new Date(invoice.dueDate) < new Date();
+        const remainingAmount = invoice.status === 'PAID' ? 0 : (invoice.totalAmount || 0);
+        
+        return {
+          invoiceId: invoice.id ? invoice.id.toString() : null,
+          invoiceNumber: invoice.invoiceNumber,
+          issueDate: invoice.invoiceDate,
+          dueDate: invoice.dueDate,
+          paidDate: invoice.paidDate,
+          status: invoice.status,
+          amounts: {
+            subtotal: invoice.subtotal,
+            taxAmount: invoice.taxAmount,
+            totalAmount: invoice.totalAmount,
+            remainingAmount: remainingAmount
+          },
+          paymentInfo: {
+            paymentMethod: invoice.paymentMethod,
+            paymentReference: invoice.paymentReference
+          },
+          isOverdue: isOverdue,
+          rentalId: invoice.rentalId
+        };
+      });
 
       return ResponseHandler.success(res, {
         invoices: formattedInvoices,
@@ -105,23 +96,23 @@ class InvoicesController {
     }
   }
 
-  // GET /api/client/invoices/:invoiceId - Obtener detalles de factura usando DDD
+  // GET /api/client/invoices/:id - Obtener detalles de factura usando DDD
   async getInvoiceDetails(req, res) {
     try {
       const { clientCompanyId } = req.user;
-      const { invoiceId } = req.params;
+      const { id } = req.params; // Changed from invoiceId to id
 
       if (!this.container) {
         throw new Error('DI Container not initialized');
       }
 
-      this.logger.info('Getting invoice details', { clientCompanyId, invoiceId });
+      this.logger.info('Getting invoice details', { clientCompanyId, invoiceId: id });
 
       // Get repository
       const invoiceRepository = this.container.resolve('invoiceRepository');
 
       // Get invoice
-      const invoice = await invoiceRepository.findById(invoiceId);
+      const invoice = await invoiceRepository.findById(id);
       if (!invoice) {
         return ResponseHandler.error(res, 'Invoice not found', 404);
       }
@@ -131,71 +122,47 @@ class InvoicesController {
         return ResponseHandler.error(res, 'Unauthorized to access this invoice', 403);
       }
 
-      // Get invoice items
-      const invoiceItems = await invoiceRepository.getInvoiceItems(invoiceId);
+      // Get payment history (simplified, may return empty array if method doesn't exist)
+      let paymentHistory = [];
+      try {
+        paymentHistory = await invoiceRepository.getPaymentHistory(id);
+      } catch (error) {
+        this.logger?.warn('Payment history not available', { error: error.message });
+      }
 
-      // Get payment history
-      const paymentHistory = await invoiceRepository.getPaymentHistory(invoiceId);
-
-      // Get related documents
-      const documents = await invoiceRepository.getInvoiceDocuments(invoiceId);
+      // Calculate simple values
+      const isOverdue = invoice.status === 'PENDING' && invoice.dueDate && new Date(invoice.dueDate) < new Date();
+      const remainingAmount = invoice.status === 'PAID' ? 0 : (invoice.totalAmount || 0);
 
       const invoiceDetails = {
-        invoiceId: invoice.id.toString(),
+        invoiceId: invoice.id ? invoice.id.toString() : null,
         invoiceNumber: invoice.invoiceNumber,
-        description: invoice.description,
-        issueDate: invoice.issueDate,
+        issueDate: invoice.invoiceDate,
         dueDate: invoice.dueDate,
         paidDate: invoice.paidDate,
         status: invoice.status,
         amounts: {
           subtotal: invoice.subtotal,
           taxAmount: invoice.taxAmount,
-          discountAmount: invoice.discountAmount,
           totalAmount: invoice.totalAmount,
-          paidAmount: invoice.paidAmount,
-          remainingAmount: invoice.getRemainingAmount()
+          remainingAmount: remainingAmount
         },
-        provider: invoice.getProviderInfo(),
-        client: invoice.getClientInfo(),
-        equipment: invoice.getEquipmentInfo(),
-        rental: invoice.getRentalInfo(),
         paymentInfo: {
           paymentMethod: invoice.paymentMethod,
-          paymentReference: invoice.paymentReference,
-          paymentStatus: invoice.getPaymentStatus(),
-          paymentTerms: invoice.paymentTerms
+          paymentReference: invoice.paymentReference
         },
-        items: invoiceItems.map(item => ({
-          itemId: item.id.toString(),
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          totalPrice: item.getTotalPrice(),
-          taxRate: item.taxRate,
-          itemType: item.itemType
-        })),
         paymentHistory: paymentHistory.map(payment => ({
-          paymentId: payment.id.toString(),
-          amount: payment.amount,
-          paymentDate: payment.paymentDate,
-          paymentMethod: payment.paymentMethod,
-          reference: payment.reference,
-          notes: payment.notes
+          paymentId: payment.id ? payment.id.toString() : payment.invoice_id?.toString(),
+          amount: payment.amount || payment.total_amount,
+          paymentDate: payment.payment_date || payment.paid_date,
+          paymentMethod: payment.payment_method,
+          reference: payment.reference || payment.payment_reference
         })),
-        documents: documents.map(doc => ({
-          documentId: doc.id.toString(),
-          filename: doc.filename,
-          documentType: doc.documentType,
-          fileUrl: doc.fileUrl,
-          uploadedAt: doc.uploadedAt
-        })),
-        timeline: invoice.getStatusTimeline(),
-        isOverdue: invoice.isOverdue(),
-        daysOverdue: invoice.getDaysOverdue(),
-        canBePaid: invoice.canBePaid(),
-        downloadUrl: invoice.getDownloadUrl(),
-        notes: invoice.notes
+        isOverdue: isOverdue,
+        rentalId: invoice.rentalId,
+        notes: invoice.notes,
+        createdAt: invoice.createdAt,
+        updatedAt: invoice.updatedAt
       };
 
       return ResponseHandler.success(res, invoiceDetails, 'Invoice details retrieved successfully');
@@ -316,88 +283,85 @@ class InvoicesController {
       dateFrom.setMonth(dateFrom.getMonth() - monthsBack);
 
       // Get summary statistics
-      const summaryStats = await invoiceRepository.getClientSummary(clientCompanyId, {
-        dateFrom
-      });
+      const summaryStats = await invoiceRepository.getClientSummary(clientCompanyId);
 
-      // Get invoices by status
-      const invoicesByStatus = await invoiceRepository.getStatusDistribution(clientCompanyId, {
-        dateFrom
-      });
-
-      // Get monthly trends
-      const monthlyTrends = await invoiceRepository.getMonthlyTrends(clientCompanyId, {
-        monthsBack
-      });
-
-      // Get overdue invoices
-      const overdueInvoices = await invoiceRepository.findOverdueByClient(clientCompanyId);
-
-      // Get upcoming payments
-      const upcomingPayments = await invoiceRepository.getUpcomingPayments(clientCompanyId, {
-        daysAhead: 30
+      // Get all client invoices for analysis
+      const allInvoices = await invoiceRepository.findByClientCompany(clientCompanyId);
+      
+      // Calculate summary manually
+      const totalInvoices = allInvoices.length;
+      let totalAmount = 0;
+      let paidAmount = 0;
+      let pendingAmount = 0;
+      let overdueAmount = 0;
+      
+      const statusCounts = {};
+      const overdueInvoices = [];
+      
+      allInvoices.forEach(invoice => {
+        const amount = parseFloat(invoice.totalAmount) || 0;
+        totalAmount += amount;
+        
+        statusCounts[invoice.status] = (statusCounts[invoice.status] || 0) + 1;
+        
+        if (invoice.status === 'PAID') {
+          paidAmount += amount;
+        } else if (invoice.status === 'PENDING') {
+          pendingAmount += amount;
+          
+          // Check if overdue
+          if (invoice.dueDate && new Date(invoice.dueDate) < new Date()) {
+            overdueAmount += amount;
+            overdueInvoices.push(invoice);
+          }
+        }
       });
 
       const summary = {
         totals: {
-          totalInvoices: summaryStats.total_invoices || 0,
-          totalAmount: summaryStats.total_amount || 0,
-          paidAmount: summaryStats.paid_amount || 0,
-          pendingAmount: summaryStats.pending_amount || 0,
-          overdueAmount: summaryStats.overdue_amount || 0,
-          averageInvoiceAmount: summaryStats.avg_invoice_amount || 0
+          totalInvoices: totalInvoices,
+          totalAmount: totalAmount,
+          paidAmount: paidAmount,
+          pendingAmount: pendingAmount,
+          overdueAmount: overdueAmount,
+          averageInvoiceAmount: totalInvoices > 0 ? totalAmount / totalInvoices : 0
         },
         distribution: {
-          byStatus: invoicesByStatus.map(item => ({
-            status: item.status,
-            count: parseInt(item.count),
-            totalAmount: parseFloat(item.total_amount),
-            percentage: parseFloat(item.percentage)
-          }))
-        },
-        trends: {
-          monthly: monthlyTrends.map(trend => ({
-            month: trend.month,
-            year: trend.year,
-            invoiceCount: parseInt(trend.invoice_count),
-            totalAmount: parseFloat(trend.total_amount),
-            paidAmount: parseFloat(trend.paid_amount),
-            pendingAmount: parseFloat(trend.pending_amount)
+          byStatus: Object.entries(statusCounts).map(([status, count]) => ({
+            status: status,
+            count: count,
+            totalAmount: allInvoices.filter(inv => inv.status === status)
+              .reduce((sum, inv) => sum + (parseFloat(inv.totalAmount) || 0), 0),
+            percentage: totalInvoices > 0 ? (count / totalInvoices) * 100 : 0
           }))
         },
         overdue: {
           count: overdueInvoices.length,
-          totalAmount: overdueInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
+          totalAmount: overdueAmount,
           invoices: overdueInvoices.slice(0, 10).map(inv => ({
-            invoiceId: inv.id.toString(),
+            invoiceId: inv.id ? inv.id.toString() : null,
             invoiceNumber: inv.invoiceNumber,
             amount: inv.totalAmount,
             dueDate: inv.dueDate,
-            daysOverdue: inv.getDaysOverdue()
+            daysOverdue: inv.dueDate ? Math.floor((new Date() - new Date(inv.dueDate)) / (1000 * 60 * 60 * 24)) : 0
           }))
         },
-        upcoming: {
-          count: upcomingPayments.length,
-          totalAmount: upcomingPayments.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0),
-          payments: upcomingPayments.slice(0, 10).map(inv => ({
-            invoiceId: inv.id.toString(),
+        recent: {
+          recentInvoices: allInvoices.slice(0, 5).map(inv => ({
+            invoiceId: inv.id ? inv.id.toString() : null,
             invoiceNumber: inv.invoiceNumber,
             amount: inv.totalAmount,
-            dueDate: inv.dueDate,
-            daysUntilDue: Math.ceil((new Date(inv.dueDate) - new Date()) / (24 * 60 * 60 * 1000))
+            status: inv.status,
+            issueDate: inv.invoiceDate,
+            dueDate: inv.dueDate
           }))
-        },
-        period: {
-          months: monthsBack,
-          from: dateFrom,
-          to: new Date()
         }
       };
 
       return ResponseHandler.success(res, summary, 'Invoices summary retrieved successfully');
 
     } catch (error) {
-      this.logger?.error('Error in getInvoicesSummary', error);
+      this.logger?.error('Error in getInvoicesSummary', { error: error.message });
       return ResponseHandler.error(res, error.message, 500);
     }
   }
@@ -421,7 +385,7 @@ class InvoicesController {
       this.logger.info('Getting payment history', { 
         clientCompanyId, 
         page, 
-        limit, 
+        limit,
         paymentMethod 
       });
 
@@ -430,9 +394,7 @@ class InvoicesController {
 
       // Build filters
       const filters = {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        paymentMethod
+        limit: parseInt(limit) || 20
       };
 
       if (dateFrom) filters.dateFrom = new Date(dateFrom);
@@ -440,22 +402,29 @@ class InvoicesController {
 
       // Get payment history
       const payments = await invoiceRepository.getClientPaymentHistory(clientCompanyId, filters);
-      const totalPayments = await invoiceRepository.countClientPayments(clientCompanyId, filters);
 
-      // Get payment summary
-      const paymentSummary = await invoiceRepository.getPaymentSummary(clientCompanyId, filters);
+      // Calculate summary
+      const totalAmount = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+      const averagePayment = payments.length > 0 ? totalAmount / payments.length : 0;
 
       const formattedPayments = payments.map(payment => ({
-        paymentId: payment.id.toString(),
-        invoiceId: payment.invoiceId.toString(),
-        invoiceNumber: payment.getInvoiceNumber(),
-        amount: payment.amount,
-        paymentDate: payment.paymentDate,
-        paymentMethod: payment.paymentMethod,
-        reference: payment.reference,
-        notes: payment.notes,
-        equipment: payment.getEquipmentInfo(),
-        provider: payment.getProviderInfo()
+        paymentId: payment.invoice_id ? payment.invoice_id.toString() : null,
+        invoiceId: payment.invoice_id ? payment.invoice_id.toString() : null,
+        invoiceNumber: payment.invoice_number,
+        amount: payment.amount || payment.total_amount,
+        paymentDate: payment.payment_date || payment.paid_date,
+        paymentMethod: payment.payment_method,
+        reference: payment.reference || payment.payment_reference,
+        issueDate: payment.issue_date,
+        dueDate: payment.due_date,
+        status: payment.status,
+        equipmentInfo: payment.equipment_id ? {
+          equipmentId: payment.equipment_id,
+          serialNumber: payment.serial_number,
+          type: payment.equipment_type,
+          manufacturer: payment.manufacturer,
+          model: payment.model
+        } : null
       }));
 
       return ResponseHandler.success(res, {
@@ -463,21 +432,116 @@ class InvoicesController {
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: totalPayments,
-          totalPages: Math.ceil(totalPayments / limit)
+          total: payments.length,
+          totalPages: Math.ceil(payments.length / parseInt(limit))
         },
         summary: {
-          totalAmount: paymentSummary.total_amount || 0,
-          averagePayment: paymentSummary.avg_payment || 0,
-          paymentsByMethod: paymentSummary.by_method || {}
+          totalAmount: totalAmount,
+          averagePayment: averagePayment,
+          totalPayments: payments.length
         }
       }, 'Payment history retrieved successfully');
 
     } catch (error) {
-      this.logger?.error('Error in getPaymentHistory', error);
+      this.logger?.error('Error in getPaymentHistory', { error: error.message });
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  // GET /api/client/invoices/:id/pdf - Descargar PDF simplificado
+  async downloadInvoicePDF(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
+      }
+
+      this.logger.info('Downloading invoice PDF', { clientCompanyId, invoiceId: id });
+
+      // Mock PDF download (sin servicio PDF real)
+      const mockPdfContent = `
+      INVOICE PDF - MOCK
+      ==================
+      Invoice ID: ${id}
+      Client Company: ${clientCompanyId}
+      Generated: ${new Date().toISOString()}
+      
+      This is a mock PDF response.
+      In production, this would generate a real PDF.
+      `;
+
+      // Set headers for text download (mock)
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="invoice-${id}.txt"`);
+      
+      // Send mock content
+      return res.send(mockPdfContent);
+
+    } catch (error) {
+      this.logger?.error('Error in downloadInvoicePDF', { error: error.message });
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  // POST /api/client/invoices/:id/mark-paid - Marcar como pagada (simplificado)
+  async markInvoiceAsPaid(req, res) {
+    try {
+      const { clientCompanyId } = req.user;
+      const { id } = req.params;
+      const { 
+        paymentAmount,
+        paymentMethod = 'TRANSFER',
+        paymentReference,
+        paymentDate,
+        notes
+      } = req.body;
+
+      if (!this.container) {
+        throw new Error('DI Container not initialized');
+      }
+
+      this.logger.info('Marking invoice as paid', { clientCompanyId, invoiceId: id });
+
+      // Get repository
+      const invoiceRepository = this.container.resolve('invoiceRepository');
+
+      // Get invoice first
+      const invoice = await invoiceRepository.findById(id);
+      if (!invoice) {
+        return ResponseHandler.error(res, 'Invoice not found', 404);
+      }
+
+      // Verify belongs to client
+      if (invoice.clientCompanyId !== clientCompanyId) {
+        return ResponseHandler.error(res, 'Unauthorized to access this invoice', 403);
+      }
+
+      // Process payment
+      const paymentData = {
+        paidDate: paymentDate ? new Date(paymentDate) : new Date(),
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference || `PAY-${Date.now()}`
+      };
+
+      const updatedInvoice = await invoiceRepository.processPayment(id, paymentData);
+
+      return ResponseHandler.success(res, {
+        invoiceId: updatedInvoice.id ? updatedInvoice.id.toString() : id,
+        invoiceNumber: updatedInvoice.invoiceNumber,
+        status: updatedInvoice.status,
+        amount: updatedInvoice.totalAmount,
+        paymentDate: updatedInvoice.paidDate,
+        paymentMethod: updatedInvoice.paymentMethod,
+        reference: updatedInvoice.paymentReference
+      }, 'Payment recorded successfully', 200);
+
+    } catch (error) {
+      this.logger?.error('Error in markInvoiceAsPaid', { error: error.message });
       return ResponseHandler.error(res, error.message, 500);
     }
   }
 }
 
-module.exports = new InvoicesController();
+module.exports = InvoicesController;

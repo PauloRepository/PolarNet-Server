@@ -1,101 +1,112 @@
+/**
+ * Provider Routes Index - DDD Architecture
+ * Rutas principales par// Rental management routes
+ */
 const express = require('express');
 const router = express.Router();
 
-// Import provider controllers (using existing DDD structure)
-const dashboardController = require('../../controllers/provider/dashboard.controller');
-const companyController = require('../../controllers/provider/company.controller');
-const clientsController = require('../../controllers/provider/clients.controller');
-const equipmentsController = require('../../controllers/provider/equipments.controller');
-const serviceRequestsController = require('../../controllers/provider/serviceRequests.controller');
-const rentalsController = require('../../controllers/provider/rentals.controller');
-const maintenancesController = require('../../controllers/provider/maintenances.controller');
-const invoicesController = require('../../controllers/provider/invoices.controller');
-const profileController = require('../../controllers/provider/profile.controller');
+// Import auth middleware
+const { authenticate, validateProvider, validateProviderOrAdmin } = require('../../middlewares/auth.middleware');
 
-// Validation middleware
-const { authenticate, validateProvider } = require('../../middlewares/auth.middleware');
+// Import DI Container singleton
+const { getContainer } = require('../../../../infrastructure/config/index');
+const container = getContainer();
 
-// Apply authentication and provider validation to all routes
+// Get controllers from DI Container
+const clientsController = container.resolve('providerClientsController');
+const dashboardController = container.resolve('providerDashboardController');
+const equipmentsController = container.resolve('providerEquipmentsController');
+const maintenancesController = container.resolve('providerMaintenancesController');
+const profileController = container.resolve('providerProfileController');
+const rentalsController = container.resolve('providerRentalsController');
+const serviceRequestsController = container.resolve('providerServiceRequestsController');
+
+// Apply authentication to all provider routes
 router.use(authenticate);
 router.use(validateProvider);
 
 // Dashboard routes
-router.get('/dashboard', dashboardController.getDashboardMetrics);
-router.get('/dashboard/activities', dashboardController.getRecentActivities);
-router.get('/dashboard/alerts', dashboardController.getAlerts);
-router.get('/dashboard/performance', dashboardController.getPerformanceMetrics);
+router.get('/dashboard', dashboardController.getDashboard.bind(dashboardController));
+router.get('/dashboard/stats', dashboardController.getStats.bind(dashboardController));
+router.get('/dashboard/equipment-performance', dashboardController.getEquipmentPerformance.bind(dashboardController));
+router.get('/dashboard/revenue', dashboardController.getRevenue.bind(dashboardController));
+router.get('/dashboard/maintenance-insights', dashboardController.getMaintenanceInsights.bind(dashboardController));
+router.get('/dashboard/service-trends', dashboardController.getServiceTrends.bind(dashboardController));
+router.get('/dashboard/client-analytics', dashboardController.getClientAnalytics.bind(dashboardController));
+router.get('/dashboard/alerts', dashboardController.getAlerts.bind(dashboardController));
+router.get('/dashboard/kpis', dashboardController.getKpis.bind(dashboardController));
 
-// Company management routes
-router.get('/company', companyController.getCompany);
-router.put('/company', companyController.updateCompany);
-router.get('/company/locations', companyController.getLocations);
-router.post('/company/locations', companyController.createLocation);
-router.put('/company/locations/:id', companyController.updateLocation);
-router.delete('/company/locations/:id', companyController.deleteLocation);
-
-// Client management routes
-router.get('/clients', clientsController.getClients);
-router.get('/clients/opportunities', clientsController.getClientOpportunities);
-router.get('/clients/:id', clientsController.getClientDetails);
-router.get('/clients/:id/service-history', clientsController.getClientServiceHistory);
-router.get('/clients/:id/analytics', clientsController.getClientAnalytics);
+// Clients management routes
+router.get('/clients', clientsController.getClients || clientsController.index);
+router.get('/clients/statistics', clientsController.getClientStatistics);
+router.get('/clients/:id', clientsController.getClientDetails || clientsController.show);
+router.get('/clients/:id/timeline', clientsController.getClientTimeline);
 router.get('/clients/:id/contracts', clientsController.getClientContracts);
-router.post('/clients/:id/notes', clientsController.addClientNote);
+router.get('/clients/:id/performance', clientsController.getClientPerformance);
+router.get('/clients/:id/insights', clientsController.getClientInsights);
+router.get('/clients/:id/export', clientsController.exportClientData);
+router.put('/clients/:id/notes', clientsController.updateClientNotes);
+router.put('/clients/:id/priority', clientsController.updateClientPriority);
+router.post('/clients', clientsController.createClient || clientsController.create);
+router.put('/clients/:id', clientsController.updateClient || clientsController.update);
+router.delete('/clients/:id', clientsController.deleteClient || clientsController.destroy);
 
 // Equipment management routes
-router.get('/equipments', equipmentsController.getEquipments);
-router.post('/equipments', equipmentsController.createEquipment);
-router.get('/equipments/:id', equipmentsController.getEquipmentDetails);
-router.put('/equipments/:id', equipmentsController.updateEquipment);
-router.delete('/equipments/:id', equipmentsController.deleteEquipment);
-router.get('/equipments/:id/readings', equipmentsController.getEquipmentReadings);
-router.post('/equipments/:id/move', equipmentsController.moveEquipment);
+router.get('/equipments', equipmentsController.getEquipments || equipmentsController.index);
+router.get('/equipments/summary', equipmentsController.getEquipmentsSummary);
+router.get('/equipments/:id', equipmentsController.getEquipmentById || equipmentsController.show);
+router.get('/equipments/:id/performance', equipmentsController.getEquipmentPerformance);
+router.post('/equipments', equipmentsController.createEquipment || equipmentsController.create);
+router.put('/equipments/:id', equipmentsController.updateEquipment || equipmentsController.update);
+router.delete('/equipments/:id', equipmentsController.deleteEquipment || equipmentsController.destroy);
 
-// Service requests routes
-router.get('/service-requests', serviceRequestsController.getServiceRequests);
-router.get('/service-requests/stats', serviceRequestsController.getServiceStats);
-router.get('/service-requests/:id', serviceRequestsController.getServiceRequestDetails);
-router.put('/service-requests/:id/assign', serviceRequestsController.assignTechnician);
-router.put('/service-requests/:id/status', serviceRequestsController.updateStatus);
-router.put('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest);
+// Maintenance management routes
+router.get('/maintenances', maintenancesController.getMaintenances || maintenancesController.index);
+router.get('/maintenances/statistics', maintenancesController.getStatistics);
+router.post('/maintenances/schedule-automatic', maintenancesController.scheduleAutomaticMaintenances);
+router.get('/maintenances/:id', maintenancesController.getMaintenanceById || maintenancesController.show);
+router.post('/maintenances', maintenancesController.createMaintenance || maintenancesController.create);
+router.put('/maintenances/:id', maintenancesController.updateMaintenance || maintenancesController.update);
+router.put('/maintenances/:id/start', maintenancesController.startMaintenance);
+router.put('/maintenances/:id/complete', maintenancesController.completeMaintenance);
+router.delete('/maintenances/:id', maintenancesController.deleteMaintenance || maintenancesController.destroy);
 
-// Maintenance routes
-router.get('/maintenances', maintenancesController.getMaintenances);
-router.get('/maintenances/calendar', maintenancesController.getMaintenanceCalendar);
-router.get('/maintenances/kpis', maintenancesController.getMaintenanceKPIs);
-router.post('/maintenances', maintenancesController.createMaintenance);
-router.get('/maintenances/:id', maintenancesController.getMaintenanceDetails);
-router.put('/maintenances/:id', maintenancesController.updateMaintenance);
-router.delete('/maintenances/:id', maintenancesController.deleteMaintenance);
-
-// Rental management routes  
-router.get('/rentals', rentalsController.getRentals);
+// Rental management routes
+router.get('/rentals', rentalsController.getRentals || rentalsController.index);
+router.get('/rental-requests', rentalsController.getRentalRequests);
 router.get('/rentals/revenue-stats', rentalsController.getRevenueStats);
 router.get('/rentals/renewals', rentalsController.getRenewals);
 router.get('/rentals/profitability', rentalsController.getProfitability);
-router.get('/rentals/requests', rentalsController.getRentalRequests);
-router.get('/rentals/:id', rentalsController.getRentalDetails);
-router.post('/rentals', rentalsController.createRental);
-router.put('/rentals/:id', rentalsController.updateRental);
-router.put('/rentals/:id/terminate', rentalsController.terminateRental);
+router.get('/rentals/:id', rentalsController.getRentalDetails || rentalsController.show);
 router.get('/rentals/:id/payments', rentalsController.getRentalPayments);
+router.post('/rentals', rentalsController.createRental || rentalsController.create);
+router.put('/rentals/:id', rentalsController.updateRental || rentalsController.update);
+router.put('/rentals/:id/terminate', rentalsController.terminateRental);
+router.delete('/rentals/:id', rentalsController.deleteRental || rentalsController.destroy);
 
-// Invoice management routes
-router.get('/invoices', invoicesController.getInvoices);
-router.get('/invoices/stats', invoicesController.getInvoiceStats);
-router.post('/invoices', invoicesController.createInvoice);
-router.get('/invoices/:id', invoicesController.getInvoiceDetails);
-router.put('/invoices/:id', invoicesController.updateInvoice);
-router.put('/invoices/:id/send', invoicesController.sendInvoice);
+// Service Request management routes
+router.get('/service-requests', serviceRequestsController.getServiceRequests || serviceRequestsController.index);
+router.get('/service-requests/statistics', serviceRequestsController.getStatistics);
+router.get('/service-requests/analytics', serviceRequestsController.getAnalytics);
+router.get('/service-requests/calendar', serviceRequestsController.getCalendar);
+router.put('/service-requests/bulk-update', serviceRequestsController.bulkUpdate);
+router.get('/service-requests/:id', serviceRequestsController.getServiceRequestById || serviceRequestsController.show);
+router.put('/service-requests/:id/assign', serviceRequestsController.assignServiceRequest || serviceRequestsController.assign);
+router.put('/service-requests/:id/status', serviceRequestsController.updateServiceRequestStatus || serviceRequestsController.updateStatus);
+router.put('/service-requests/:id/start', serviceRequestsController.startServiceRequest);
+router.put('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest);
+router.post('/service-requests/:id/updates', serviceRequestsController.addUpdate);
 
 // Profile management routes
-router.get('/profile', profileController.getProfile);
-router.put('/profile/user', profileController.updateUserProfile);
-router.put('/profile/company', profileController.updateCompanyProfile);
-router.put('/profile/password', profileController.changePassword);
+router.get('/profile', profileController.getProfile || profileController.index);
+router.get('/profile/settings', profileController.getSettings);
+router.get('/profile/insights', profileController.getInsights);
 router.get('/profile/team', profileController.getTeamMembers);
+router.put('/profile', profileController.updateProfile || profileController.update);
+router.put('/profile/settings', profileController.updateSettings);
+router.put('/profile/password', profileController.changePassword || profileController.updatePassword);
+router.post('/profile/certifications', profileController.addCertification);
+router.delete('/profile/certifications/:id', profileController.removeCertification);
 router.post('/profile/team', profileController.addTeamMember);
-router.put('/profile/team/:userId', profileController.updateTeamMember);
-router.delete('/profile/team/:userId', profileController.removeTeamMember);
 
 module.exports = router;

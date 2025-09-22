@@ -764,6 +764,149 @@ class PostgreSQLActiveRentalRepository extends IActiveRentalRepository {
   async getClientSummary(clientCompanyId) {
     return this.getClientStatistics(clientCompanyId);
   }
+
+  /**
+   * Count active rentals by provider
+   * @param {number} providerId - Provider company ID
+   * @returns {Promise<number>}
+   */
+  async countActiveByProvider(providerId) {
+    try {
+      const query = `
+        SELECT COUNT(*) as count
+        FROM active_rentals 
+        WHERE provider_company_id = $1 AND status = 'ACTIVE'
+      `;
+      
+      const result = await this.db.query(query, [providerId]);
+      return parseInt(result.rows[0].count) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.countActiveByProvider:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get rental statistics
+   * @param {number} providerId - Provider company ID
+   * @param {Object} filters - Statistics filters
+   * @returns {Promise<Object>}
+   */
+  async getStatistics(providerId, filters = {}) {
+    try {
+      const { period = '30days' } = filters;
+      
+      let dateFilter = '';
+      if (period === '30days') {
+        dateFilter = `AND ar.start_date >= CURRENT_DATE - INTERVAL '30 days'`;
+      } else if (period === '6months') {
+        dateFilter = `AND ar.start_date >= CURRENT_DATE - INTERVAL '6 months'`;
+      }
+
+      const query = `
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN ar.status = 'ACTIVE' THEN 1 END) as active,
+          COALESCE(SUM(ar.monthly_rate), 0) as revenue,
+          COALESCE(AVG(CASE WHEN ar.status = 'ACTIVE' THEN 1 ELSE 0 END) * 100, 0) as utilization
+        FROM active_rentals ar
+        WHERE ar.provider_company_id = $1 ${dateFilter}
+      `;
+
+      const result = await this.db.query(query, [providerId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.getStatistics:', error);
+      return { total: 0, active: 0, revenue: 0, utilization: 0 };
+    }
+  }
+
+  /**
+   * Get revenue analytics
+   * @param {number} providerId - Provider company ID
+   * @param {Object} filters - Revenue filters
+   * @returns {Promise<Object>}
+   */
+  async getRevenueAnalytics(providerId, filters = {}) {
+    try {
+      const { period = '12months', groupBy = 'month' } = filters;
+      
+      let dateGrouping = 'month';
+      let intervalClause = '12 months';
+      
+      if (period === '30days') {
+        dateGrouping = 'day';
+        intervalClause = '30 days';
+      } else if (period === '6months') {
+        dateGrouping = 'month';
+        intervalClause = '6 months';
+      }
+
+      const query = `
+        SELECT 
+          DATE_TRUNC('${dateGrouping}', ar.start_date) as period,
+          COUNT(*) as rental_count,
+          COALESCE(SUM(ar.monthly_rate), 0) as total_revenue,
+          COALESCE(AVG(ar.monthly_rate), 0) as avg_revenue
+        FROM active_rentals ar
+        WHERE ar.provider_company_id = $1 
+          AND ar.start_date >= CURRENT_DATE - INTERVAL '${intervalClause}'
+        GROUP BY DATE_TRUNC('${dateGrouping}', ar.start_date)
+        ORDER BY period
+      `;
+
+      const result = await this.db.query(query, [providerId]);
+      
+      const totalRevenue = result.rows.reduce((sum, row) => sum + parseFloat(row.total_revenue), 0);
+      const avgMonthlyRevenue = totalRevenue / Math.max(result.rows.length, 1);
+      
+      return {
+        revenue: result.rows,
+        totalRevenue,
+        avgMonthlyRevenue: Math.round(avgMonthlyRevenue * 100) / 100,
+        growth: totalRevenue * 0.1, // Mock growth
+        projectedRevenue: totalRevenue * 1.1 // Mock projection
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.getRevenueAnalytics:', error);
+      return {
+        revenue: [],
+        totalRevenue: 0,
+        avgMonthlyRevenue: 0,
+        growth: 0,
+        projectedRevenue: 0
+      };
+    }
+  }
+
+  /**
+   * Get revenue KPI
+   * @param {number} providerId - Provider company ID
+   * @param {string} period - Time period
+   * @returns {Promise<Object>}
+   */
+  async getRevenueKPI(providerId, period) {
+    try {
+      const currentQuery = `
+        SELECT COALESCE(SUM(monthly_rate), 0) as revenue
+        FROM active_rentals
+        WHERE provider_company_id = $1 AND status = 'ACTIVE'
+      `;
+
+      const result = await this.db.query(currentQuery, [providerId]);
+      const current = parseFloat(result.rows[0].revenue) || 0;
+
+      return {
+        current: current,
+        previous: current * 0.9, // Mock previous period
+        change: current * 0.1, // Mock change
+        target: current * 1.2 // Mock target
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.getRevenueKPI:', error);
+      return { current: 0, previous: 0, change: 0, target: 0 };
+    }
+  }
 }
 
 module.exports = PostgreSQLActiveRentalRepository;

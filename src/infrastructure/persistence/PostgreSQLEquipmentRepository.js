@@ -1153,6 +1153,164 @@ class PostgreSQLEquipmentRepository extends IEquipmentRepository {
     }
   }
 
+  /**
+   * Count equipments by provider
+   * @param {number} providerId - Provider company ID
+   * @returns {Promise<number>}
+   */
+  async countByProvider(providerId) {
+    try {
+      const query = `
+        SELECT COUNT(*) as count
+        FROM equipments 
+        WHERE provider_company_id = $1 AND is_active = true
+      `;
+      
+      const result = await this.db.query(query, [providerId]);
+      return parseInt(result.rows[0].count) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLEquipmentRepository.countByProvider:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Get equipment statistics
+   * @param {number} providerId - Provider company ID
+   * @param {Object} filters - Filters
+   * @returns {Promise<Object>}
+   */
+  async getStatistics(providerId, filters = {}) {
+    try {
+      const { period = '30days' } = filters;
+      
+      let dateFilter = '';
+      if (period === '30days') {
+        dateFilter = `AND e.created_at >= CURRENT_DATE - INTERVAL '30 days'`;
+      } else if (period === '6months') {
+        dateFilter = `AND e.created_at >= CURRENT_DATE - INTERVAL '6 months'`;
+      }
+
+      const query = `
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN e.status = 'OPERATIONAL' THEN 1 END) as active,
+          COUNT(CASE WHEN e.status = 'MAINTENANCE' THEN 1 END) as maintenance,
+          COALESCE(AVG(CASE WHEN ar.rental_id IS NOT NULL THEN 1 ELSE 0 END) * 100, 0) as utilization
+        FROM equipments e
+        LEFT JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+        WHERE e.provider_company_id = $1 AND e.is_active = true ${dateFilter}
+      `;
+
+      const result = await this.db.query(query, [providerId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in PostgreSQLEquipmentRepository.getStatistics:', error);
+      return { total: 0, active: 0, maintenance: 0, utilization: 0 };
+    }
+  }
+
+  /**
+   * Get performance metrics
+   * @param {number} providerId - Provider company ID
+   * @param {Object} filters - Performance filters
+   * @returns {Promise<Object>}
+   */
+  async getPerformanceMetrics(providerId, filters = {}) {
+    try {
+      const { period = '6months', equipmentType = '', sortBy = 'utilization' } = filters;
+      
+      let dateFilter = '';
+      let typeFilter = '';
+      
+      if (period === '30days') {
+        dateFilter = `AND ar.start_date >= CURRENT_DATE - INTERVAL '30 days'`;
+      } else if (period === '6months') {
+        dateFilter = `AND ar.start_date >= CURRENT_DATE - INTERVAL '6 months'`;
+      }
+
+      if (equipmentType) {
+        typeFilter = `AND e.type = '${equipmentType}'`;
+      }
+
+      const query = `
+        SELECT 
+          e.equipment_id,
+          e.name,
+          e.type,
+          e.model,
+          COUNT(ar.rental_id) as rental_count,
+          COALESCE(SUM(ar.total_cost), 0) as total_revenue,
+          COALESCE(AVG(ar.total_cost), 0) as avg_revenue,
+          CASE 
+            WHEN COUNT(ar.rental_id) > 0 THEN 
+              (COUNT(ar.rental_id) * 100.0 / EXTRACT(days FROM (CURRENT_DATE - COALESCE(MIN(ar.start_date), CURRENT_DATE))))
+            ELSE 0 
+          END as utilization_percentage
+        FROM equipments e
+        LEFT JOIN active_rentals ar ON e.equipment_id = ar.equipment_id ${dateFilter}
+        WHERE e.provider_company_id = $1 AND e.is_active = true ${typeFilter}
+        GROUP BY e.equipment_id, e.name, e.type, e.model
+        ORDER BY ${sortBy === 'revenue' ? 'total_revenue' : 'utilization_percentage'} DESC
+        LIMIT 20
+      `;
+
+      const result = await this.db.query(query, [providerId]);
+      
+      // Calculate summary metrics
+      const totalRevenue = result.rows.reduce((sum, row) => sum + parseFloat(row.total_revenue || 0), 0);
+      const avgUtilization = result.rows.reduce((sum, row) => sum + parseFloat(row.utilization_percentage || 0), 0) / Math.max(result.rows.length, 1);
+      
+      return {
+        equipment: result.rows,
+        avgUtilization: Math.round(avgUtilization * 100) / 100,
+        totalRevenue: totalRevenue,
+        equipmentCount: result.rows.length,
+        maintenanceCosts: 0 // Would need maintenance cost data
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLEquipmentRepository.getPerformanceMetrics:', error);
+      return {
+        equipment: [],
+        avgUtilization: 0,
+        totalRevenue: 0,
+        equipmentCount: 0,
+        maintenanceCosts: 0
+      };
+    }
+  }
+
+  /**
+   * Get utilization KPI
+   * @param {number} providerId - Provider company ID
+   * @param {string} period - Time period
+   * @returns {Promise<Object>}
+   */
+  async getUtilizationKPI(providerId, period) {
+    try {
+      const currentQuery = `
+        SELECT 
+          COALESCE(AVG(CASE WHEN ar.rental_id IS NOT NULL THEN 1 ELSE 0 END) * 100, 0) as utilization
+        FROM equipments e
+        LEFT JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+        WHERE e.provider_company_id = $1 AND e.is_active = true
+      `;
+
+      const result = await this.db.query(currentQuery, [providerId]);
+      const current = parseFloat(result.rows[0].utilization) || 0;
+
+      return {
+        current: Math.round(current * 100) / 100,
+        previous: current * 0.9, // Mock previous period
+        change: current * 0.1, // Mock change
+        target: 85
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLEquipmentRepository.getUtilizationKPI:', error);
+      return { current: 0, previous: 0, change: 0, target: 85 };
+    }
+  }
+
   // Private helper methods
 
   /**

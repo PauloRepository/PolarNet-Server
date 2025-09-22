@@ -1,62 +1,41 @@
+/**
+ * Controller: Client Dashboard Management
+ * Handles CLIENT dashboard operations using DDD architecture
+ */
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
-class DashboardController {
-  constructor() {
-    this.container = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+class ClientDashboardController {
+  constructor(container) {
     this.container = container;
+    this.dashboardUseCase = container.resolve('getClientDashboard');
+    this.logger = container.resolve('logger');
   }
 
-  // GET /api/client/dashboard - Dashboard principal del cliente usando DDD
+  /**
+   * Get client dashboard overview
+   * GET /api/client/dashboard
+   */
   async getDashboardMetrics(req, res) {
     try {
-      const { clientCompanyId } = req.user;
-
-      // Lazy load container if not available
-      if (!this.container) {
-        console.warn('Container not injected, loading dynamically...');
-        const { getContainer } = require('../../../../infrastructure/config/index');
-        this.container = getContainer();
-      }
-
-      // Get logger from container with fallback
-      let logger;
-      try {
-        logger = this.container.resolve('logger');
-      } catch (loggerError) {
-        logger = console; // Fallback to console
-        console.warn('Logger not available, using console fallback');
-      }
-
-      // Debug: Check database connection status
-      try {
-        const database = this.container.resolve('database');
-        console.log('Database instance in controller:', {
-          isConnected: database.isConnected,
-          hasPool: !!database.pool
-        });
-      } catch (dbError) {
-        console.error('Could not resolve database from container:', dbError.message);
-      }
+      const clientCompanyId = req.user.clientCompanyId;
       
-      logger.info('Getting dashboard metrics', { clientCompanyId, userId: req.user?.userId });
+      this.logger.info('Getting dashboard metrics', { clientCompanyId, userId: req.user?.userId });
 
       // Use DDD Use Case
-      const getDashboardUseCase = this.container.resolve('getClientDashboard');
-      const dashboard = await getDashboardUseCase.getDashboardMetrics(clientCompanyId);
+      const dashboard = await this.dashboardUseCase.getDashboardMetrics(clientCompanyId);
 
       return ResponseHandler.success(res, dashboard, 'Dashboard metrics retrieved successfully');
 
     } catch (error) {
-      console.error('Error in getDashboardMetrics:', error);
+      this.logger.error('Error in getDashboardMetrics:', error);
       return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // GET /api/client/dashboard/activities - Actividades recientes usando DDD
+  /**
+   * Get recent activities
+   * GET /api/client/dashboard/activities
+   */
   async getRecentActivities(req, res) {
     try {
       const { clientCompanyId } = req.user;
@@ -352,4 +331,4 @@ class DashboardController {
   }
 }
 
-module.exports = new DashboardController();
+module.exports = ClientDashboardController;

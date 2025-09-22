@@ -1,409 +1,413 @@
+/**
+ * Controller: Provider Profile Management  
+ * Handles PROVIDER profile operations using DDD architecture
+ */
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
-const db = require('../../../../infrastructure/database/index');
-const bcrypt = require('bcrypt');
 
-class ProfileController {
-  // GET /api/provider/profile - Obtener perfil completo
+class ProviderProfileController {
+  constructor(container) {
+    this.container = container;
+    this.profileUseCase = container.resolve('providerProfileUseCase');
+    this.ResponseDTO = container.resolve('ProviderProfileResponseDTO');
+    this.logger = container.resolve('logger');
+  }
+
+  /**
+   * Get complete provider profile
+   * GET /api/provider/profile
+   */
   async getProfile(req, res) {
     try {
-      const { userId, providerCompanyId } = req.user;
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
 
-      // Obtener datos del usuario
-      const userQuery = `
-        SELECT 
-          u.*,
-          c.name as company_name,
-          c.type as company_type,
-          c.phone as company_phone,
-          c.email as company_email,
-          c.address as company_address,
-          c.city as company_city,
-          c.state as company_state,
-          c.website as company_website,
-          c.description as company_description
-        FROM users u
-        LEFT JOIN companies c ON u.company_id = c.company_id
-        WHERE u.user_id = $1
-      `;
+      const profileData = await this.profileUseCase.getProviderProfile(providerId, userId);
+      const formattedResult = this.ResponseDTO.formatProfileDetails(profileData);
 
-      const userResult = await db.query(userQuery, [userId]);
-
-      if (userResult.rows.length === 0) {
-        return ResponseHandler.error(res, 'Usuario no encontrado', 'USER_NOT_FOUND', 404);
-      }
-
-      const user = userResult.rows[0];
-
-      // Obtener estadísticas del usuario si es técnico
-      let userStats = null;
-      if (user.role === 'PROVIDER') {
-        const statsQuery = `
-          SELECT 
-            COUNT(DISTINCT sr.service_request_id) as assigned_services,
-            COUNT(DISTINCT CASE WHEN sr.status = 'COMPLETED' THEN sr.service_request_id END) as completed_services,
-            COUNT(DISTINCT m.maintenance_id) as assigned_maintenances,
-            COUNT(DISTINCT CASE WHEN m.status = 'COMPLETED' THEN m.maintenance_id END) as completed_maintenances,
-            AVG(CASE WHEN sr.client_rating IS NOT NULL THEN sr.client_rating END) as avg_rating
-          FROM users u
-          LEFT JOIN service_requests sr ON u.user_id = sr.assigned_technician_id
-          LEFT JOIN maintenances m ON u.user_id = m.technician_id
-          WHERE u.user_id = $1
-        `;
-
-        const statsResult = await db.query(statsQuery, [userId]);
-        userStats = statsResult.rows[0];
-      }
-
-      return ResponseHandler.success(res, {
-        user: {
-          userId: user.user_id.toString(),
-          firstName: user.first_name,
-          lastName: user.last_name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-          isActive: user.is_active,
-          createdAt: user.created_at,
-          stats: userStats ? {
-            assignedServices: parseInt(userStats.assigned_services),
-            completedServices: parseInt(userStats.completed_services),
-            assignedMaintenances: parseInt(userStats.assigned_maintenances),
-            completedMaintenances: parseInt(userStats.completed_maintenances),
-            avgRating: userStats.avg_rating ? parseFloat(userStats.avg_rating).toFixed(1) : null
-          } : null
-        },
-        company: {
-          companyId: user.company_id.toString(),
-          name: user.company_name,
-          type: user.company_type,
-          phone: user.company_phone,
-          email: user.company_email,
-          address: user.company_address,
-          city: user.company_city,
-          state: user.company_state,
-          website: user.company_website,
-          description: user.company_description
-        }
-      }, 'Perfil obtenido exitosamente');
-
+      return ResponseHandler.success(res, formattedResult, 'Perfil del proveedor obtenido exitosamente');
     } catch (error) {
-      console.error('Error en getProfile:', error);
-      return ResponseHandler.error(res, 'Error al obtener perfil', 'GET_PROFILE_ERROR', 500);
+      console.error('ProviderProfileController.getProfile error:', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/provider/profile/user - Actualizar perfil de usuario
-  async updateUserProfile(req, res) {
+  /**
+   * Update provider profile
+   * PUT /api/provider/profile
+   */
+  async updateProfile(req, res) {
     try {
-      const { userId } = req.user;
-      const { firstName, lastName, phone } = req.body;
-
-      const updateQuery = `
-        UPDATE users SET
-          first_name = COALESCE($1, first_name),
-          last_name = COALESCE($2, last_name),
-          phone = COALESCE($3, phone),
-          updated_at = NOW()
-        WHERE user_id = $4
-        RETURNING user_id, first_name, last_name, email, phone, role, is_active, created_at, updated_at
-      `;
-
-      const result = await db.query(updateQuery, [firstName, lastName, phone, userId]);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.error(res, 'Usuario no encontrado', 'USER_NOT_FOUND', 404);
-      }
-
-      return ResponseHandler.success(res, {
-        user: result.rows[0]
-      }, 'Perfil de usuario actualizado exitosamente');
-
-    } catch (error) {
-      console.error('Error en updateUserProfile:', error);
-      return ResponseHandler.error(res, 'Error al actualizar perfil de usuario', 'UPDATE_USER_PROFILE_ERROR', 500);
-    }
-  }
-
-  // PUT /api/provider/profile/company - Actualizar perfil de empresa
-  async updateCompanyProfile(req, res) {
-    try {
-      const { providerCompanyId } = req.user;
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
       const {
-        name, phone, email, address, city, state,
-        website, description, businessType, specialization
+        // Company data
+        companyName,
+        companyDescription,
+        companyPhone,
+        companyEmail,
+        companyWebsite,
+        companyAddress,
+        companyCity,
+        companyState,
+        companyCountry,
+        companyPostalCode,
+        // Service areas
+        serviceRadius,
+        serviceAreas = [],
+        specializations = [],
+        // Business data
+        businessHours = {},
+        emergencyAvailable = false,
+        emergencyHours = {},
+        // User data
+        firstName,
+        lastName,
+        email,
+        phone,
+        position,
+        department
       } = req.body;
 
-      const updateQuery = `
-        UPDATE companies SET
-          name = COALESCE($1, name),
-          phone = COALESCE($2, phone),
-          email = COALESCE($3, email),
-          address = COALESCE($4, address),
-          city = COALESCE($5, city),
-          state = COALESCE($6, state),
-          website = COALESCE($7, website),
-          description = COALESCE($8, description),
-          business_type = COALESCE($9, business_type),
-          specialization = COALESCE($10, specialization),
-          updated_at = NOW()
-        WHERE company_id = $11
-        RETURNING *
-      `;
+      const updateData = {
+        company: {
+          ...(companyName && { name: companyName.trim() }),
+          ...(companyDescription !== undefined && { description: companyDescription.trim() }),
+          ...(companyPhone && { phone: companyPhone.trim() }),
+          ...(companyEmail && { email: companyEmail.trim() }),
+          ...(companyWebsite !== undefined && { website: companyWebsite.trim() }),
+          ...(companyAddress !== undefined && { address: companyAddress.trim() }),
+          ...(companyCity !== undefined && { city: companyCity.trim() }),
+          ...(companyState !== undefined && { state: companyState.trim() }),
+          ...(companyCountry !== undefined && { country: companyCountry.trim() }),
+          ...(companyPostalCode !== undefined && { postalCode: companyPostalCode.trim() }),
+          ...(serviceRadius && { serviceRadius: parseFloat(serviceRadius) }),
+          ...(serviceAreas.length && { serviceAreas }),
+          ...(specializations.length && { specializations }),
+          ...(Object.keys(businessHours).length && { businessHours }),
+          ...(emergencyAvailable !== undefined && { emergencyAvailable }),
+          ...(Object.keys(emergencyHours).length && { emergencyHours })
+        },
+        user: {
+          ...(firstName && { firstName: firstName.trim() }),
+          ...(lastName && { lastName: lastName.trim() }),
+          ...(email && { email: email.trim() }),
+          ...(phone !== undefined && { phone: phone ? phone.trim() : null }),
+          ...(position !== undefined && { position: position ? position.trim() : null }),
+          ...(department !== undefined && { department: department ? department.trim() : null })
+        },
+        updatedBy: userId
+      };
 
-      const values = [
-        name, phone, email, address, city, state,
-        website, description, businessType, specialization, providerCompanyId
-      ];
+      const result = await this.profileUseCase.updateProviderProfile(providerId, userId, updateData);
+      const formattedResult = this.ResponseDTO.formatProfileDetails(result);
 
-      const result = await db.query(updateQuery, values);
-
-      if (result.rows.length === 0) {
-        return ResponseHandler.error(res, 'Empresa no encontrada', 'COMPANY_NOT_FOUND', 404);
-      }
-
-      return ResponseHandler.success(res, {
-        company: result.rows[0]
-      }, 'Perfil de empresa actualizado exitosamente');
-
+      return ResponseHandler.success(res, formattedResult, 'Perfil actualizado exitosamente');
     } catch (error) {
-      console.error('Error en updateCompanyProfile:', error);
-      return ResponseHandler.error(res, 'Error al actualizar perfil de empresa', 'UPDATE_COMPANY_PROFILE_ERROR', 500);
+      console.error('ProviderProfileController.updateProfile error:', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/provider/profile/password - Cambiar contraseña
+  /**
+   * Get profile settings
+   * GET /api/provider/profile/settings
+   */
+  async getSettings(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
+
+      const settingsData = await this.profileUseCase.getProviderSettings(providerId, userId);
+      const formattedResult = this.ResponseDTO.formatProfileSettings(settingsData);
+
+      return ResponseHandler.success(res, formattedResult, 'Configuraciones obtenidas exitosamente');
+    } catch (error) {
+      console.error('ProviderProfileController.getSettings error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Update profile settings
+   * PUT /api/provider/profile/settings
+   */
+  async updateSettings(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
+      const {
+        // Notification settings
+        emailNotifications = {},
+        smsNotifications = {},
+        pushNotifications = {},
+        // System preferences
+        language = 'es',
+        timezone = 'America/Mexico_City',
+        dateFormat = 'DD/MM/YYYY',
+        timeFormat = '24h',
+        currency = 'MXN',
+        // Privacy settings
+        profileVisibility = 'PUBLIC',
+        contactInfoVisibility = 'CLIENTS_ONLY',
+        // Business settings
+        autoAcceptRequests = false,
+        requireApprovalForExpensiveServices = true,
+        defaultServiceRadius = 50,
+        workingDays = ['MON', 'TUE', 'WED', 'THU', 'FRI'],
+        workingHours = { start: '08:00', end: '18:00' }
+      } = req.body;
+
+      const settingsData = {
+        notifications: {
+          email: emailNotifications,
+          sms: smsNotifications,
+          push: pushNotifications
+        },
+        preferences: {
+          language,
+          timezone,
+          dateFormat,
+          timeFormat,
+          currency
+        },
+        privacy: {
+          profileVisibility,
+          contactInfoVisibility
+        },
+        business: {
+          autoAcceptRequests,
+          requireApprovalForExpensiveServices,
+          defaultServiceRadius: parseFloat(defaultServiceRadius),
+          workingDays,
+          workingHours
+        },
+        updatedBy: userId
+      };
+
+      const result = await this.profileUseCase.updateProviderSettings(providerId, userId, settingsData);
+      const formattedResult = this.ResponseDTO.formatProfileSettings(result);
+
+      return ResponseHandler.success(res, formattedResult, 'Configuraciones actualizadas exitosamente');
+    } catch (error) {
+      console.error('ProviderProfileController.updateSettings error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Change password
+   * PUT /api/provider/profile/password
+   */
   async changePassword(req, res) {
     try {
-      const { userId } = req.user;
-      const { currentPassword, newPassword } = req.body;
+      const userId = req.user.userId;
+      const {
+        currentPassword,
+        newPassword,
+        confirmPassword
+      } = req.body;
 
-      // Obtener contraseña actual
-      const userQuery = `
-        SELECT password_hash FROM users WHERE user_id = $1
-      `;
-
-      const userResult = await db.query(userQuery, [userId]);
-
-      if (userResult.rows.length === 0) {
-        return ResponseHandler.error(res, 'Usuario no encontrado', 'USER_NOT_FOUND', 404);
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        return ResponseHandler.error(res, 'Contraseña actual, nueva contraseña y confirmación son requeridas', 400);
       }
 
-      // Verificar contraseña actual
-      const isValidPassword = await bcrypt.compare(currentPassword, userResult.rows[0].password_hash);
-
-      if (!isValidPassword) {
-        return ResponseHandler.error(res, 'Contraseña actual incorrecta', 'INVALID_CURRENT_PASSWORD', 400);
+      if (newPassword !== confirmPassword) {
+        return ResponseHandler.error(res, 'Las contraseñas no coinciden', 400);
       }
 
-      // Hash de la nueva contraseña
-      const saltRounds = 10;
-      const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+      if (newPassword.length < 8) {
+        return ResponseHandler.error(res, 'La nueva contraseña debe tener al menos 8 caracteres', 400);
+      }
 
-      // Actualizar contraseña
-      const updateQuery = `
-        UPDATE users SET
-          password_hash = $1,
-          updated_at = NOW()
-        WHERE user_id = $2
-      `;
+      const passwordData = {
+        currentPassword,
+        newPassword
+      };
 
-      await db.query(updateQuery, [hashedNewPassword, userId]);
+      await this.profileUseCase.changePassword(userId, passwordData);
 
-      return ResponseHandler.success(res, {
-        message: 'Contraseña actualizada exitosamente'
-      }, 'Contraseña cambiada exitosamente');
-
+      return ResponseHandler.success(res, { changed: true }, 'Contraseña cambiada exitosamente');
     } catch (error) {
-      console.error('Error en changePassword:', error);
-      return ResponseHandler.error(res, 'Error al cambiar contraseña', 'CHANGE_PASSWORD_ERROR', 500);
+      console.error('ProviderProfileController.changePassword error:', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // GET /api/provider/profile/team - Obtener miembros del equipo
+  /**
+   * Get profile statistics and insights
+   * GET /api/provider/profile/insights
+   */
+  async getInsights(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const {
+        period = '12months',
+        includeComparison = true
+      } = req.query;
+
+      const filters = {
+        period,
+        includeComparison: includeComparison === 'true'
+      };
+
+      const insightsData = await this.profileUseCase.getProviderInsights(providerId, filters);
+      const formattedResult = this.ResponseDTO.formatProfileInsights(insightsData);
+
+      return ResponseHandler.success(res, formattedResult, 'Análisis del perfil obtenido exitosamente');
+    } catch (error) {
+      console.error('ProviderProfileController.getInsights error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Add or update certification
+   * POST /api/provider/profile/certifications
+   */
+  async addCertification(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
+      const {
+        certificationName,
+        certificationBody,
+        certificationNumber,
+        issueDate,
+        expiryDate,
+        description = '',
+        attachmentUrl = ''
+      } = req.body;
+
+      if (!certificationName || !certificationBody || !issueDate) {
+        return ResponseHandler.error(res, 'Nombre, organismo emisor y fecha de emisión son requeridos', 400);
+      }
+
+      const certificationData = {
+        certificationName: certificationName.trim(),
+        certificationBody: certificationBody.trim(),
+        certificationNumber: certificationNumber ? certificationNumber.trim() : null,
+        issueDate,
+        expiryDate,
+        description: description.trim(),
+        attachmentUrl: attachmentUrl.trim(),
+        addedBy: userId
+      };
+
+      const result = await this.profileUseCase.addCertification(providerId, certificationData);
+      const formattedResult = this.ResponseDTO.formatCertification(result);
+
+      return ResponseHandler.success(res, formattedResult, 'Certificación agregada exitosamente', 201);
+    } catch (error) {
+      console.error('ProviderProfileController.addCertification error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Remove certification
+   * DELETE /api/provider/profile/certifications/:id
+   */
+  async removeCertification(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const { id: certificationId } = req.params;
+
+      if (!certificationId) {
+        return ResponseHandler.error(res, 'ID de certificación requerido', 400);
+      }
+
+      await this.profileUseCase.removeCertification(providerId, certificationId);
+
+      return ResponseHandler.success(res, { deleted: true }, 'Certificación eliminada exitosamente');
+    } catch (error) {
+      console.error('ProviderProfileController.removeCertification error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Get team members
+   * GET /api/provider/profile/team
+   */
   async getTeamMembers(req, res) {
     try {
-      const { providerCompanyId } = req.user;
+      const providerId = req.user.companyId;
+      const {
+        page = 1,
+        limit = 20,
+        role = '',
+        department = '',
+        status = 'ACTIVE'
+      } = req.query;
 
-      const teamQuery = `
-        SELECT 
-          u.user_id,
-          u.first_name,
-          u.last_name,
-          u.email,
-          u.phone,
-          u.role,
-          u.is_active,
-          u.created_at,
-          COUNT(DISTINCT sr.service_request_id) as assigned_services,
-          COUNT(DISTINCT CASE WHEN sr.status = 'COMPLETED' THEN sr.service_request_id END) as completed_services,
-          COUNT(DISTINCT m.maintenance_id) as assigned_maintenances,
-          AVG(CASE WHEN sr.client_rating IS NOT NULL THEN sr.client_rating END) as avg_rating
-        FROM users u
-        LEFT JOIN service_requests sr ON u.user_id = sr.assigned_technician_id 
-          AND sr.created_at >= CURRENT_DATE - interval '30 days'
-        LEFT JOIN maintenances m ON u.user_id = m.technician_id 
-          AND m.created_at >= CURRENT_DATE - interval '30 days'
-        WHERE u.company_id = $1 AND u.role = 'PROVIDER'
-        GROUP BY u.user_id
-        ORDER BY u.first_name, u.last_name
-      `;
+      const filters = {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        role,
+        department,
+        status
+      };
 
-      const result = await db.query(teamQuery, [providerCompanyId]);
+      const teamData = await this.profileUseCase.getTeamMembers(providerId, filters);
+      const formattedResult = this.ResponseDTO.formatTeamMembers(teamData);
 
-      const teamMembers = result.rows.map(member => ({
-        userId: member.user_id.toString(),
-        firstName: member.first_name,
-        lastName: member.last_name,
-        fullName: `${member.first_name} ${member.last_name}`,
-        email: member.email,
-        phone: member.phone,
-        role: member.role,
-        isActive: member.is_active,
-        createdAt: member.created_at,
-        stats: {
-          assignedServices: parseInt(member.assigned_services),
-          completedServices: parseInt(member.completed_services),
-          assignedMaintenances: parseInt(member.assigned_maintenances),
-          avgRating: member.avg_rating ? parseFloat(member.avg_rating).toFixed(1) : null
-        }
-      }));
-
-      return ResponseHandler.success(res, {
-        teamMembers,
-        totalMembers: teamMembers.length
-      }, 'Miembros del equipo obtenidos exitosamente');
-
+      return ResponseHandler.success(res, formattedResult, 'Miembros del equipo obtenidos exitosamente');
     } catch (error) {
-      console.error('Error en getTeamMembers:', error);
-      return ResponseHandler.error(res, 'Error al obtener miembros del equipo', 'GET_TEAM_MEMBERS_ERROR', 500);
+      console.error('ProviderProfileController.getTeamMembers error:', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // POST /api/provider/profile/team - Agregar nuevo miembro del equipo
+  /**
+   * Add team member
+   * POST /api/provider/profile/team
+   */
   async addTeamMember(req, res) {
     try {
-      const { providerCompanyId } = req.user;
-      const { firstName, lastName, email, phone, password } = req.body;
+      const providerId = req.user.companyId;
+      const userId = req.user.userId;
+      const {
+        firstName,
+        lastName,
+        email,
+        phone,
+        role = 'TECHNICIAN',
+        department,
+        position,
+        specializations = [],
+        permissions = []
+      } = req.body;
 
-      // Verificar si el email ya existe
-      const emailCheck = await db.query(
-        'SELECT user_id FROM users WHERE email = $1',
-        [email]
-      );
-
-      if (emailCheck.rows.length > 0) {
-        return ResponseHandler.error(res, 'El email ya está registrado', 'EMAIL_EXISTS', 400);
+      if (!firstName || !lastName || !email) {
+        return ResponseHandler.error(res, 'Nombre, apellido y email son requeridos', 400);
       }
 
-      // Hash de la contraseña
-      const saltRounds = 10;
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
+      const memberData = {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        phone: phone ? phone.trim() : null,
+        role,
+        department: department ? department.trim() : null,
+        position: position ? position.trim() : null,
+        specializations,
+        permissions,
+        addedBy: userId
+      };
 
-      const insertQuery = `
-        INSERT INTO users (
-          first_name, last_name, email, phone, password_hash,
-          company_id, role, is_active
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'PROVIDER', true)
-        RETURNING user_id, first_name, last_name, email, phone, role, is_active, created_at
-      `;
+      const result = await this.profileUseCase.addTeamMember(providerId, memberData);
+      const formattedResult = this.ResponseDTO.formatTeamMember(result);
 
-      const values = [firstName, lastName, email, phone, hashedPassword, providerCompanyId];
-
-      const result = await db.query(insertQuery, values);
-
-      return ResponseHandler.success(res, {
-        teamMember: result.rows[0]
-      }, 'Miembro del equipo agregado exitosamente');
-
+      return ResponseHandler.success(res, formattedResult, 'Miembro del equipo agregado exitosamente', 201);
     } catch (error) {
-      console.error('Error en addTeamMember:', error);
-      return ResponseHandler.error(res, 'Error al agregar miembro del equipo', 'ADD_TEAM_MEMBER_ERROR', 500);
+      console.error('ProviderProfileController.addTeamMember error:', error);
+      return ResponseHandler.error(res, error.message, 500);
     }
   }
 
-  // PUT /api/provider/profile/team/:userId - Actualizar miembro del equipo
-  async updateTeamMember(req, res) {
-    try {
-      const { providerCompanyId } = req.user;
-      const { userId } = req.params;
-      const { firstName, lastName, phone, isActive } = req.body;
-
-      // Verificar que el usuario pertenece a la empresa
-      const memberCheck = await db.query(
-        'SELECT user_id FROM users WHERE user_id = $1 AND company_id = $2 AND role = $3',
-        [userId, providerCompanyId, 'PROVIDER']
-      );
-
-      if (memberCheck.rows.length === 0) {
-        return ResponseHandler.error(res, 'Miembro del equipo no encontrado', 'TEAM_MEMBER_NOT_FOUND', 404);
-      }
-
-      const updateQuery = `
-        UPDATE users SET
-          first_name = COALESCE($1, first_name),
-          last_name = COALESCE($2, last_name),
-          phone = COALESCE($3, phone),
-          is_active = COALESCE($4, is_active),
-          updated_at = NOW()
-        WHERE user_id = $5 AND company_id = $6
-        RETURNING user_id, first_name, last_name, email, phone, role, is_active, created_at, updated_at
-      `;
-
-      const result = await db.query(updateQuery, [
-        firstName, lastName, phone, isActive, userId, providerCompanyId
-      ]);
-
-      return ResponseHandler.success(res, {
-        teamMember: result.rows[0]
-      }, 'Miembro del equipo actualizado exitosamente');
-
-    } catch (error) {
-      console.error('Error en updateTeamMember:', error);
-      return ResponseHandler.error(res, 'Error al actualizar miembro del equipo', 'UPDATE_TEAM_MEMBER_ERROR', 500);
-    }
-  }
-
-  // DELETE /api/provider/profile/team/:userId - Remover miembro del equipo
-  async removeTeamMember(req, res) {
-    try {
-      const { providerCompanyId, userId: currentUserId } = req.user;
-      const { userId } = req.params;
-
-      // No permitir que se elimine a sí mismo
-      if (userId === currentUserId.toString()) {
-        return ResponseHandler.error(res, 'No puedes eliminarte a ti mismo', 'CANNOT_DELETE_SELF', 400);
-      }
-
-      // Verificar que el usuario pertenece a la empresa
-      const memberCheck = await db.query(
-        'SELECT user_id FROM users WHERE user_id = $1 AND company_id = $2 AND role = $3',
-        [userId, providerCompanyId, 'PROVIDER']
-      );
-
-      if (memberCheck.rows.length === 0) {
-        return ResponseHandler.error(res, 'Miembro del equipo no encontrado', 'TEAM_MEMBER_NOT_FOUND', 404);
-      }
-
-      // En lugar de eliminar, desactivar el usuario para mantener integridad referencial
-      const updateQuery = `
-        UPDATE users SET
-          is_active = false,
-          updated_at = NOW()
-        WHERE user_id = $1 AND company_id = $2
-        RETURNING user_id, first_name, last_name, email, is_active
-      `;
-
-      const result = await db.query(updateQuery, [userId, providerCompanyId]);
-
-      return ResponseHandler.success(res, {
-        removedMember: result.rows[0]
-      }, 'Miembro del equipo removido exitosamente');
-
-    } catch (error) {
-      console.error('Error en removeTeamMember:', error);
-      return ResponseHandler.error(res, 'Error al remover miembro del equipo', 'REMOVE_TEAM_MEMBER_ERROR', 500);
-    }
-  }
+  // Legacy method aliases for compatibility with existing routes
+  async index(req, res) { return this.getProfile(req, res); }
+  async update(req, res) { return this.updateProfile(req, res); }
 }
 
-module.exports = new ProfileController();
+module.exports = ProviderProfileController;

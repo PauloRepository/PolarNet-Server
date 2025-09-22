@@ -1,13 +1,7 @@
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
 class ServiceRequestsController {
-  constructor() {
-    this.container = null;
-    this.logger = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+  constructor(container) {
     this.container = container;
     this.logger = container.resolve('logger');
   }
@@ -326,4 +320,4 @@ class ServiceRequestsController {
   }
 }
 
-module.exports = new ServiceRequestsController();
+module.exports = ServiceRequestsController;

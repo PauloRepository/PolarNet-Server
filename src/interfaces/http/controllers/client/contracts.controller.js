@@ -1,13 +1,7 @@
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
 class ContractsController {
-  constructor() {
-    this.container = null;
-    this.logger = null;
-  }
-
-  // Inject DI container
-  setContainer(container) {
+  constructor(container) {
     this.container = container;
     this.logger = container.resolve('logger');
   }
@@ -317,59 +311,6 @@ class ContractsController {
     }
   }
 
-  // GET /api/client/contracts/:id - Obtener detalles del contrato usando DDD
-  async getContractDetails(req, res) {
-    try {
-      const { clientCompanyId } = req.user;
-      const { id } = req.params; // Changed from contractId to id
-
-      if (!this.container) {
-        throw new Error('DI Container not initialized');
-      }
-
-      this.logger.info('Getting contract details', { clientCompanyId, contractId: id });
-
-      // Get repository
-      const activeRentalRepository = this.container.resolve('activeRentalRepository');
-
-      // Get contract
-      const contract = await activeRentalRepository.findById(id);
-      if (!contract) {
-        return ResponseHandler.error(res, 'Contract not found', 404);
-      }
-
-      // Verify belongs to client
-      if (contract.clientCompanyId !== clientCompanyId) {
-        return ResponseHandler.error(res, 'Unauthorized to access this contract', 403);
-      }
-
-      // Format response
-      const contractDetails = {
-        contractId: contract.id ? contract.id.toString() : null,
-        rentalId: contract.rentalId ? contract.rentalId.toString() : null,
-        status: contract.status,
-        startDate: contract.startDate,
-        endDate: contract.endDate,
-        monthlyRate: contract.monthlyRate,
-        totalPaid: contract.totalPaid || 0,
-        equipmentId: contract.equipmentId,
-        clientCompanyId: contract.clientCompanyId,
-        providerCompanyId: contract.providerCompanyId,
-        securityDeposit: contract.securityDeposit,
-        renewalTerms: contract.renewalTerms,
-        specialConditions: contract.specialConditions,
-        createdAt: contract.createdAt,
-        updatedAt: contract.updatedAt
-      };
-
-      return ResponseHandler.success(res, contractDetails, 'Contract details retrieved successfully');
-
-    } catch (error) {
-      this.logger?.error('Error in getContractDetails', { error: error.message });
-      return ResponseHandler.error(res, error.message, 500);
-    }
-  }
-
   // PUT /api/client/contracts/:id/extend - Solicitar extensión de contrato usando DDD
   async requestContractExtension(req, res) {
     try {
@@ -497,4 +438,4 @@ class ContractsController {
   }
 }
 
-module.exports = new ContractsController();
+module.exports = ContractsController;

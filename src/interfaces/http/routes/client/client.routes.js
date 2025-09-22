@@ -1,25 +1,17 @@
 const express = require('express');
 const router = express.Router();
 
-// Import DI Container singleton (UBICACIÓN CORREGIDA)
+// Import DI Container singleton
 const { getContainer } = require('../../../../infrastructure/config/index');
 const container = getContainer();
 
-// Get modernized controllers from correct path
-const dashboardController = require('../../controllers/client/dashboard.controller');
-const equipmentsController = require('../../controllers/client/equipments.controller');
-const serviceRequestsController = require('../../controllers/client/serviceRequests.controller');
-const contractsController = require('../../controllers/client/contracts.controller');
-const invoicesController = require('../../controllers/client/invoices.controller');
-const profileController = require('../../controllers/client/profile.controller');
-
-// Inject DI container into modernized controllers
-dashboardController.setContainer(container);
-equipmentsController.setContainer(container);
-serviceRequestsController.setContainer(container);
-contractsController.setContainer(container);
-invoicesController.setContainer(container);
-profileController.setContainer(container);
+// Get controllers from DI container (already instantiated with dependencies)
+const dashboardController = container.resolve('clientDashboardController');
+const equipmentsController = container.resolve('clientEquipmentsController');
+const serviceRequestsController = container.resolve('clientServiceRequestsController');
+const contractsController = container.resolve('clientContractsController');
+const invoicesController = container.resolve('clientInvoicesController');
+const profileController = container.resolve('clientProfileController');
 
 // Validation middleware
 const { authenticate, validateClient } = require('../../middlewares/auth.middleware');
