@@ -1,6 +1,7 @@
 /**
  * Controller: Provider Maintenances Management  
- * Handles PROVIDER maintenance operations
+ * Handles PROVIDER maintenance operations using DDD architecture
+ * Endpoints que corresponden a tabla maintenances: maintenance_id, equipment_id, technician_id, status, type, etc.
  */
 const ResponseHandler = require('../../../../shared/helpers/responseHandler');
 
@@ -157,6 +158,73 @@ class ProviderMaintenancesController {
   }
 
   /**
+   * Update maintenance
+   * PUT /api/provider/maintenances/:id
+   */
+  async updateMaintenance(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const { id: maintenanceId } = req.params;
+      const updateFields = req.body;
+
+      if (!maintenanceId) {
+        return ResponseHandler.error(res, 'ID de mantenimiento requerido', 400);
+      }
+
+      // Campos permitidos para actualización según BD
+      const allowedFields = [
+        'title', 'description', 'type', 'category', 'scheduledDate',
+        'estimatedDurationHours', 'priority', 'technicianId', 'estimatedCost',
+        'laborCost', 'partsCost', 'preMaintenanceChecklist', 'maintenanceSteps',
+        'postMaintenanceChecklist', 'safetyRequirements', 'requiredParts', 'requiredTools'
+      ];
+
+      const updateData = {};
+      allowedFields.forEach(field => {
+        if (updateFields[field] !== undefined) {
+          updateData[field] = updateFields[field];
+        }
+      });
+
+      if (Object.keys(updateData).length === 0) {
+        return ResponseHandler.error(res, 'No hay datos para actualizar', 400);
+      }
+
+      updateData.updatedBy = req.user.userId;
+
+      const result = await this.maintenanceUseCase.updateMaintenance(providerId, maintenanceId, updateData);
+      const formattedResult = this.ResponseDTO.formatMaintenanceDetails(result);
+
+      return ResponseHandler.success(res, formattedResult, 'Mantenimiento actualizado exitosamente');
+    } catch (error) {
+      console.error('ProviderMaintenancesController.updateMaintenance error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Delete maintenance
+   * DELETE /api/provider/maintenances/:id
+   */
+  async deleteMaintenance(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const { id: maintenanceId } = req.params;
+
+      if (!maintenanceId) {
+        return ResponseHandler.error(res, 'ID de mantenimiento requerido', 400);
+      }
+
+      await this.maintenanceUseCase.deleteMaintenance(providerId, maintenanceId);
+
+      return ResponseHandler.success(res, { deleted: true }, 'Mantenimiento eliminado exitosamente');
+    } catch (error) {
+      console.error('ProviderMaintenancesController.deleteMaintenance error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
    * Start maintenance (cambiar status a IN_PROGRESS)
    * PUT /api/provider/maintenances/:id/start
    */
@@ -245,6 +313,82 @@ class ProviderMaintenancesController {
       return ResponseHandler.error(res, error.message, 500);
     }
   }
+
+  /**
+   * Get maintenance statistics
+   * GET /api/provider/maintenances/statistics
+   */
+  async getStatistics(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const {
+        period = '12months',
+        type = '',
+        technicianId = '',
+        equipmentType = ''
+      } = req.query;
+
+      const filters = {
+        period,
+        type,
+        technicianId,
+        equipmentType
+      };
+
+      const statistics = await this.maintenanceUseCase.getMaintenanceStatistics(providerId, filters);
+      const formattedResult = this.ResponseDTO.formatMaintenanceStatistics(statistics);
+
+      return ResponseHandler.success(res, formattedResult, 'Estadísticas de mantenimiento obtenidas exitosamente');
+    } catch (error) {
+      console.error('ProviderMaintenancesController.getStatistics error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  /**
+   * Schedule automatic maintenances based on equipment maintenance intervals
+   * POST /api/provider/maintenances/schedule-automatic
+   */
+  async scheduleAutomaticMaintenances(req, res) {
+    try {
+      const providerId = req.user.companyId;
+      const {
+        equipmentIds = [],
+        maintenanceType = 'PREVENTIVE',
+        intervalDays = 90,
+        startDate,
+        assignToTechnician = null
+      } = req.body;
+
+      if (!equipmentIds.length || !startDate) {
+        return ResponseHandler.error(res, 'IDs de equipos y fecha de inicio son requeridos', 400);
+      }
+
+      const scheduleData = {
+        equipmentIds: equipmentIds.map(id => parseInt(id)),
+        maintenanceType,
+        intervalDays: parseInt(intervalDays),
+        startDate,
+        assignToTechnician: assignToTechnician ? parseInt(assignToTechnician) : null,
+        createdBy: req.user.userId
+      };
+
+      const result = await this.maintenanceUseCase.scheduleAutomaticMaintenances(providerId, scheduleData);
+      const formattedResult = result.map(maintenance => this.ResponseDTO.formatMaintenanceSummary(maintenance));
+
+      return ResponseHandler.success(res, { scheduled: formattedResult }, 'Mantenimientos automáticos programados exitosamente');
+    } catch (error) {
+      console.error('ProviderMaintenancesController.scheduleAutomaticMaintenances error:', error);
+      return ResponseHandler.error(res, error.message, 500);
+    }
+  }
+
+  // Legacy method aliases for compatibility with existing routes
+  async index(req, res) { return this.getMaintenances(req, res); }
+  async show(req, res) { return this.getMaintenanceById(req, res); }
+  async create(req, res) { return this.createMaintenance(req, res); }
+  async update(req, res) { return this.updateMaintenance(req, res); }
+  async destroy(req, res) { return this.deleteMaintenance(req, res); }
 }
 
 module.exports = ProviderMaintenancesController;
