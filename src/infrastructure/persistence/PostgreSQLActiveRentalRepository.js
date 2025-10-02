@@ -85,6 +85,93 @@ class PostgreSQLActiveRentalRepository extends IActiveRentalRepository {
   }
 
   /**
+   * Find active rentals by client company
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<ActiveRental[]>}
+   */
+  async findByClientCompany(clientCompanyId, filters = {}) {
+    try {
+      const { page = 1, limit = 20, status, equipmentType } = filters;
+      const offset = (page - 1) * limit;
+
+      let whereClause = 'WHERE ar.client_company_id = $1';
+      let queryParams = [clientCompanyId];
+      let paramCount = 1;
+
+      if (status) {
+        whereClause += ` AND ar.status = $${++paramCount}`;
+        queryParams.push(status);
+      }
+
+      if (equipmentType) {
+        whereClause += ` AND e.type = $${++paramCount}`;
+        queryParams.push(equipmentType);
+      }
+
+      const query = `
+        SELECT ar.*, 
+               pe.name as provider_company_name,
+               e.name as equipment_name, e.serial_number, e.type as equipment_type, e.model,
+               COUNT(*) OVER() as total_count
+        FROM active_rentals ar
+        LEFT JOIN companies pe ON ar.provider_company_id = pe.company_id
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        ${whereClause}
+        ORDER BY ar.start_date DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+      
+      queryParams.push(limit, offset);
+      const result = await this.db.query(query, queryParams);
+      
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.findByClientCompany:', error);
+      throw new Error(`Failed to find active rentals by client: ${error.message}`);
+    }
+  }
+
+  /**
+   * Count active rentals by client company
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<number>}
+   */
+  async countByClientCompany(clientCompanyId, filters = {}) {
+    try {
+      const { status, equipmentType } = filters;
+      
+      let whereClause = 'WHERE ar.client_company_id = $1';
+      let queryParams = [clientCompanyId];
+      let paramCount = 1;
+
+      if (status) {
+        whereClause += ` AND ar.status = $${++paramCount}`;
+        queryParams.push(status);
+      }
+
+      if (equipmentType) {
+        whereClause += ` AND e.type = $${++paramCount}`;
+        queryParams.push(equipmentType);
+      }
+
+      const query = `
+        SELECT COUNT(*) as total
+        FROM active_rentals ar
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        ${whereClause}
+      `;
+      
+      const result = await this.db.query(query, queryParams);
+      return parseInt(result.rows[0].total) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.countByClientCompany:', error);
+      throw new Error(`Failed to count active rentals by client: ${error.message}`);
+    }
+  }
+
+  /**
    * Create new active rental
    * @param {Object} rentalData - Rental data
    * @returns {Promise<ActiveRental>}
@@ -201,6 +288,37 @@ class PostgreSQLActiveRentalRepository extends IActiveRentalRepository {
     } catch (error) {
       console.error('Error in PostgreSQLActiveRentalRepository.getProviderStatistics:', error);
       throw new Error(`Failed to get provider statistics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get active rental by equipment
+   * @param {number} equipmentId - Equipment ID
+   * @returns {Promise<Object|null>}
+   */
+  async getActiveRentalByEquipment(equipmentId) {
+    try {
+      const query = `
+        SELECT ar.*, 
+               c.name as client_company_name,
+               pe.name as provider_company_name
+        FROM active_rentals ar
+        LEFT JOIN companies c ON ar.client_company_id = c.company_id
+        LEFT JOIN companies pe ON ar.provider_company_id = pe.company_id
+        WHERE ar.equipment_id = $1 AND ar.status = 'ACTIVE'
+        LIMIT 1
+      `;
+      
+      const result = await this.db.query(query, [equipmentId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return this.mapRowToEntity(result.rows[0]);
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.getActiveRentalByEquipment:', error);
+      throw new Error(`Failed to get active rental by equipment: ${error.message}`);
     }
   }
 

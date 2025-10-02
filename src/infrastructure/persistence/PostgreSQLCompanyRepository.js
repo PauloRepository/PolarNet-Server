@@ -20,7 +20,7 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
     try {
       const query = `
         SELECT * FROM companies 
-        WHERE company_id = $1 AND deleted_at IS NULL
+        WHERE company_id = $1
       `;
       
       const result = await this.db.query(query, [id]);
@@ -47,7 +47,7 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
       const { page = 1, limit = 20, search = '' } = filters;
       const offset = (page - 1) * limit;
 
-      let whereClause = 'WHERE type = $1 AND deleted_at IS NULL';
+      let whereClause = 'WHERE company_type = $1';
       let queryParams = [type];
       let paramCount = 1;
 
@@ -133,7 +133,7 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
       const query = `
         UPDATE companies 
         SET ${setClause}, updated_at = CURRENT_TIMESTAMP
-        WHERE company_id = $1 AND deleted_at IS NULL
+        WHERE company_id = $1
         RETURNING *
       `;
       
@@ -160,8 +160,8 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
     try {
       const query = `
         UPDATE companies 
-        SET deleted_at = CURRENT_TIMESTAMP, status = 'INACTIVE'
-        WHERE company_id = $1 AND deleted_at IS NULL
+        SET status = 'INACTIVE'
+        WHERE company_id = $1
         RETURNING company_id
       `;
       
@@ -182,9 +182,9 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
     try {
       const query = `
         SELECT 
-          (SELECT COUNT(*) FROM companies WHERE type = 'CLIENT' AND deleted_at IS NULL) as total_clients,
+          (SELECT COUNT(*) FROM companies WHERE company_type = 'CLIENT') as total_clients,
           (SELECT COUNT(*) FROM active_rentals WHERE provider_company_id = $1) as active_rentals,
-          (SELECT COUNT(*) FROM equipments WHERE provider_company_id = $1) as total_equipments,
+          (SELECT COUNT(*) FROM equipments WHERE owner_company_id = $1) as total_equipments,
           (SELECT COUNT(*) FROM service_requests WHERE provider_company_id = $1 AND status = 'PENDING') as pending_requests
       `;
       
@@ -232,8 +232,7 @@ class PostgreSQLCompanyRepository extends ICompanyRepository {
       website: row.website,
       status: row.status,
       createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      deletedAt: row.deleted_at
+      updatedAt: row.updated_at
     });
   }
 }

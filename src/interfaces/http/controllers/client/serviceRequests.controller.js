@@ -34,9 +34,6 @@ class ServiceRequestsController {
         equipmentId 
       });
 
-      // Get use case
-      const clientServiceRequestUseCase = this.container.resolve('createServiceRequest'); // Same use case handles both operations
-
       // Build filters
       const filters = {
         page: parseInt(page),
@@ -50,10 +47,21 @@ class ServiceRequestsController {
       if (dateFrom) filters.dateFrom = new Date(dateFrom);
       if (dateTo) filters.dateTo = new Date(dateTo);
 
-      // Get service requests using use case
-      const result = await clientServiceRequestUseCase.getServiceRequests(clientCompanyId, filters);
+      // Get repositories
+      const serviceRequestRepository = this.container.resolve('serviceRequestRepository');
 
-      return ResponseHandler.success(res, result.data, 'Service requests retrieved successfully');
+      // Get service requests by client
+      const serviceRequests = await serviceRequestRepository.findByClientCompany(clientCompanyId, filters);
+
+      return ResponseHandler.success(res, {
+        serviceRequests: serviceRequests.serviceRequests || [],
+        pagination: serviceRequests.pagination || {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: 0,
+          totalPages: 0
+        }
+      }, 'Service requests retrieved successfully');
 
     } catch (error) {
       this.logger?.error('Error in getServiceRequests', { error: error.message });

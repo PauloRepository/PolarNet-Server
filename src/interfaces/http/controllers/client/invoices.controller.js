@@ -59,9 +59,9 @@ class InvoicesController {
         const remainingAmount = invoice.status === 'PAID' ? 0 : (invoice.totalAmount || 0);
         
         return {
-          invoiceId: invoice.id ? invoice.id.toString() : null,
+          invoiceId: invoice.invoiceId ? invoice.invoiceId.toString() : null,
           invoiceNumber: invoice.invoiceNumber,
-          issueDate: invoice.invoiceDate,
+          issueDate: invoice.issueDate,
           dueDate: invoice.dueDate,
           paidDate: invoice.paidDate,
           status: invoice.status,
@@ -112,14 +112,9 @@ class InvoicesController {
       const invoiceRepository = this.container.resolve('invoiceRepository');
 
       // Get invoice
-      const invoice = await invoiceRepository.findById(id);
+      const invoice = await invoiceRepository.findByIdForClient(id, clientCompanyId);
       if (!invoice) {
         return ResponseHandler.error(res, 'Invoice not found', 404);
-      }
-
-      // Verify belongs to client
-      if (invoice.clientCompanyId !== clientCompanyId) {
-        return ResponseHandler.error(res, 'Unauthorized to access this invoice', 403);
       }
 
       // Get payment history (simplified, may return empty array if method doesn't exist)
@@ -135,9 +130,9 @@ class InvoicesController {
       const remainingAmount = invoice.status === 'PAID' ? 0 : (invoice.totalAmount || 0);
 
       const invoiceDetails = {
-        invoiceId: invoice.id ? invoice.id.toString() : null,
+        invoiceId: invoice.invoiceId ? invoice.invoiceId.toString() : null,
         invoiceNumber: invoice.invoiceNumber,
-        issueDate: invoice.invoiceDate,
+        issueDate: invoice.issueDate,
         dueDate: invoice.dueDate,
         paidDate: invoice.paidDate,
         status: invoice.status,
@@ -185,18 +180,25 @@ class InvoicesController {
 
       this.logger.info('Downloading invoice PDF', { clientCompanyId, invoiceId: id });
 
-      // Get use case
-      const generateInvoicePDFUseCase = this.container.resolve('generateInvoicePDF');
+      // Get services
+      const invoiceRepository = this.container.resolve('invoiceRepository');
+      const pdfService = this.container.resolve('generateInvoicePDF');
 
-      // Generate and download PDF
-      const pdfBuffer = await generateInvoicePDFUseCase.execute({
-        invoiceId: id,
-        clientCompanyId
-      });
+      // Get invoice first
+      const invoice = await invoiceRepository.findByIdForClient(id, clientCompanyId);
+      if (!invoice) {
+        return ResponseHandler.error(res, 'Invoice not found', 404);
+      }
+
+      // Generate PDF
+      const pdfBuffer = await pdfService.generateInvoicePDF(invoice);
+
+      // Get file name
+      const fileName = pdfService.getInvoiceFileName(invoice);
 
       // Set headers for PDF download
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="invoice-${id}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Length', pdfBuffer.length);
 
       // Send PDF buffer

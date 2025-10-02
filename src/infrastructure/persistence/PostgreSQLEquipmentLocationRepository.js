@@ -183,6 +183,16 @@ class PostgreSQLEquipmentLocationRepository extends IEquipmentLocationRepository
   }
 
   /**
+   * Find equipment locations by company (alias for findByClientCompany)
+   * @param {number} companyId - Company ID
+   * @param {Object} filters - Additional filters
+   * @returns {Promise<Object>}
+   */
+  async findByCompany(companyId, filters = {}) {
+    return this.findByClientCompany(companyId, filters);
+  }
+
+  /**
    * Create new equipment location
    * @param {Object} locationData - Equipment location data
    * @returns {Promise<Object>}

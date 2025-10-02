@@ -237,6 +237,15 @@ class IEquipmentRepository {
   async getRevenueByEquipment(companyId, dateRange = {}) {
     throw new Error('Method getRevenueByEquipment must be implemented');
   }
+
+  /**
+   * Get client equipment statistics (for dashboard)
+   * @param {number} clientCompanyId - Client company ID
+   * @returns {Promise<Object>}
+   */
+  async getClientStatistics(clientCompanyId) {
+    throw new Error('Method getClientStatistics must be implemented');
+  }
 }
 
 module.exports = IEquipmentRepository;

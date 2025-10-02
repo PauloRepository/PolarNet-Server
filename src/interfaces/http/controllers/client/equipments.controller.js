@@ -38,7 +38,7 @@ class ClientEquipmentsController {
       const temperatureRepository = this.container.resolve('temperatureReadingRepository');
 
       // Get equipments rented by client
-      const equipments = await equipmentRepository.findRentedByClient(clientCompanyId, {
+      const result = await equipmentRepository.findRentedByClient(clientCompanyId, {
         page: parseInt(page),
         limit: parseInt(limit),
         type,
@@ -47,13 +47,8 @@ class ClientEquipmentsController {
         search
       });
 
-      // Get pagination info
-      const totalEquipments = await equipmentRepository.countRentedByClient(clientCompanyId, {
-        type,
-        locationId,
-        status,
-        search
-      });
+      const equipments = result.equipments || [];
+      const pagination = result.pagination || {};
 
       // Enrich equipments with current readings and alerts
       const enrichedEquipments = await Promise.all(equipments.map(async (equipment) => {
@@ -72,17 +67,17 @@ class ClientEquipmentsController {
           model: equipment.model,
           serialNumber: equipment.serialNumber,
           status: equipment.status,
-          rental: typeof equipment.getRentalInfo === 'function' ? equipment.getRentalInfo() : equipment.rentalInfo || null,
-          location: typeof equipment.getLocationInfo === 'function' ? equipment.getLocationInfo() : equipment.locationInfo || null,
-          provider: typeof equipment.getProviderInfo === 'function' ? equipment.getProviderInfo() : equipment.providerInfo || null,
+          rental: equipment.rentalDetails || null,
+          location: equipment.locationAddress || null,
+          provider: equipment.providerCompanyName || null,
           currentReading: currentReading ? {
-            temperature: currentReading.temperature,
-            timestamp: currentReading.recordedAt,
-            status: currentReading.alertStatus || 'NORMAL'
+            temperature: currentReading.value,
+            timestamp: currentReading.timestamp,
+            status: currentReading.status || 'NORMAL'
           } : null,
           alerts24h: alerts24h || 0,
-          nextMaintenance: equipment.getNextMaintenanceDate(),
-    specifications: equipment.technicalSpecs
+          nextMaintenance: null, // Will be implemented later
+          specifications: equipment.specifications || equipment.technicalSpecs
         };
       }));
 
@@ -91,14 +86,9 @@ class ClientEquipmentsController {
 
       return ResponseHandler.success(res, {
         equipments: enrichedEquipments,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: totalEquipments,
-          totalPages: Math.ceil(totalEquipments / limit)
-        },
+        pagination: pagination,
         filters: {
-          types: availableTypes
+          types: availableTypes || []
         }
       }, 'Equipments retrieved successfully');
 
@@ -159,7 +149,7 @@ class ClientEquipmentsController {
       }
 
       // Get recent alerts
-      const recentAlerts = await temperatureRepository.findAlertsByEquipment(equipmentId, {
+      const recentAlertsResult = await temperatureRepository.findAlertsByEquipment(equipmentId, {
         limit: 10,
         dateFrom: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
       });
@@ -171,20 +161,20 @@ class ClientEquipmentsController {
         model: equipment.model,
         serialNumber: equipment.serialNumber,
         status: equipment.status,
-        installationDate: equipment.installationDate,
-        specifications: equipment.technicalSpecs,
-        rental: equipment.getRentalInfo(),
-        location: equipment.getLocationInfo(),
-        provider: equipment.getProviderInfo(),
+        installationDate: equipment.createdAt,
+        specifications: equipment.specifications,
+        rental: equipment.rentalDetails || null,
+        location: equipment.locationAddress || null,
+        provider: equipment.providerCompanyName || null,
         temperatureStats: temperatureStats ? {
-          avgTemperature: parseFloat(temperatureStats.avg_temperature) || 0,
-          minTemperature: parseFloat(temperatureStats.min_temperature) || 0,
-          maxTemperature: parseFloat(temperatureStats.max_temperature) || 0,
-          readingsCount: parseInt(temperatureStats.readings_count) || 0,
-          alertsCount: parseInt(temperatureStats.alerts_count) || 0
+          avgTemperature: temperatureStats.avgTemperature || 0,
+          minTemperature: temperatureStats.minTemperature || 0,
+          maxTemperature: temperatureStats.maxTemperature || 0,
+          readingsCount: temperatureStats.totalReadings || 0,
+          alertsCount: temperatureStats.alertCount || 0
         } : null,
         maintenance: {
-          history: maintenanceHistory.map(m => ({
+          history: (maintenanceHistory || []).map(m => ({
             maintenanceId: m && m.id != null ? m.id.toString() : null,
             type: m.type,
             title: m.title,
@@ -194,14 +184,14 @@ class ClientEquipmentsController {
             status: m.status,
             cost: m.cost
           })),
-          nextScheduled: equipment.getNextMaintenanceDate()
+          nextScheduled: null // Will be implemented later
         },
-        recentAlerts: recentAlerts.map(alert => ({
-          alertId: alert && alert.id != null ? alert.id.toString() : null,
-          temperature: alert.temperature,
-          status: alert.alertStatus,
-          timestamp: alert.recordedAt,
-          severity: alert.alertStatus === 'CRITICAL' ? 'high' : 'medium'
+        recentAlerts: (recentAlertsResult.alerts || []).map(alert => ({
+          alertId: alert && alert.temperature_reading_id != null ? alert.temperature_reading_id.toString() : null,
+          temperature: alert.value,
+          status: alert.status,
+          timestamp: alert.timestamp,
+          severity: alert.status === 'CRITICAL' ? 'high' : 'medium'
         }))
       };
 

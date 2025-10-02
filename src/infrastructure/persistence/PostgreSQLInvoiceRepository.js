@@ -82,7 +82,7 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
         SELECT 
           i.*,
           c.name as client_company_name,
-          c.contact_email as client_contact_email
+          c.email as client_contact_email
         FROM invoices i
         LEFT JOIN companies c ON i.client_company_id = c.company_id
         WHERE i.invoice_id = $1 AND i.provider_company_id = $2
@@ -98,6 +98,39 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
     } catch (error) {
       console.error('Error in PostgreSQLInvoiceRepository.findById:', error);
       throw new Error(`Failed to find invoice by ID: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find invoice by ID for client
+   * @param {number} invoiceId - Invoice ID
+   * @param {number} clientCompanyId - Client company ID
+   * @returns {Promise<Object|null>}
+   */
+  async findByIdForClient(invoiceId, clientCompanyId) {
+    try {
+      const query = `
+        SELECT 
+          i.*,
+          p.name as provider_company_name,
+          p.email as provider_contact_email,
+          c.name as client_company_name
+        FROM invoices i
+        LEFT JOIN companies p ON i.provider_company_id = p.company_id
+        LEFT JOIN companies c ON i.client_company_id = c.company_id
+        WHERE i.invoice_id = $1 AND i.client_company_id = $2
+      `;
+      
+      const result = await this.db.query(query, [invoiceId, clientCompanyId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return this.mapRowToEntity(result.rows[0]);
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.findByIdForClient:', error);
+      throw new Error(`Failed to find invoice by ID for client: ${error.message}`);
     }
   }
 
@@ -263,7 +296,218 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
     }
   }
 
+  /**
+   * Find invoices by client company
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Search and filter criteria
+   * @returns {Promise<Object>}
+   */
+  async findByClientCompany(clientCompanyId, filters = {}) {
+    try {
+      const { page = 1, limit = 20, status = '', paymentStatus = '' } = filters;
+      const offset = (page - 1) * limit;
+
+      let whereClause = 'WHERE i.client_company_id = $1';
+      let queryParams = [clientCompanyId];
+      let paramCount = 1;
+
+      if (status) {
+        whereClause += ` AND i.status = $${++paramCount}`;
+        queryParams.push(status);
+      }
+
+      if (paymentStatus) {
+        whereClause += ` AND i.payment_status = $${++paramCount}`;
+        queryParams.push(paymentStatus);
+      }
+
+      const query = `
+        SELECT 
+          i.*,
+          p.name as provider_company_name,
+          COUNT(*) OVER() as total_count
+        FROM invoices i
+        LEFT JOIN companies p ON i.provider_company_id = p.company_id
+        ${whereClause}
+        ORDER BY i.created_at DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+
+      queryParams.push(limit, offset);
+      const result = await this.db.query(query, queryParams);
+      
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.findByClientCompany:', error);
+      throw new Error(`Failed to find invoices by client: ${error.message}`);
+    }
+  }
+
+  /**
+   * Count invoices by client company
+   * @param {number} clientCompanyId - Client company ID
+   * @param {Object} filters - Search and filter criteria
+   * @returns {Promise<number>}
+   */
+  async countByClientCompany(clientCompanyId, filters = {}) {
+    try {
+      const { status = '', paymentStatus = '' } = filters;
+      
+      let whereClause = 'WHERE client_company_id = $1';
+      let queryParams = [clientCompanyId];
+      let paramCount = 1;
+
+      if (status) {
+        whereClause += ` AND status = $${++paramCount}`;
+        queryParams.push(status);
+      }
+
+      if (paymentStatus) {
+        whereClause += ` AND payment_status = $${++paramCount}`;
+        queryParams.push(paymentStatus);
+      }
+
+      const query = `
+        SELECT COUNT(*) as total
+        FROM invoices 
+        ${whereClause}
+      `;
+      
+      const result = await this.db.query(query, queryParams);
+      return parseInt(result.rows[0].total) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.countByClientCompany:', error);
+      throw new Error(`Failed to count invoices by client: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get client statistics (for dashboard)
+   * @param {number} clientCompanyId - Client company ID
+   * @returns {Promise<Object>}
+   */
+  async getClientStatistics(clientCompanyId) {
+    try {
+      const query = `
+        SELECT 
+          COUNT(*) as total_invoices,
+          COUNT(CASE WHEN status = 'PENDING' THEN 1 END) as pending_invoices,
+          COUNT(CASE WHEN status = 'PAID' THEN 1 END) as paid_invoices,
+          COUNT(CASE WHEN status = 'OVERDUE' THEN 1 END) as overdue_invoices,
+          COALESCE(SUM(CASE WHEN status = 'PENDING' THEN total_amount END), 0) as pending_amount,
+          COALESCE(SUM(CASE WHEN status = 'PAID' THEN total_amount END), 0) as total_paid
+        FROM invoices 
+        WHERE client_company_id = $1
+      `;
+      
+      const result = await this.db.query(query, [clientCompanyId]);
+      
+      return {
+        totalInvoices: parseInt(result.rows[0].total_invoices) || 0,
+        pendingInvoices: parseInt(result.rows[0].pending_invoices) || 0,
+        paidInvoices: parseInt(result.rows[0].paid_invoices) || 0,
+        overdueInvoices: parseInt(result.rows[0].overdue_invoices) || 0,
+        pendingAmount: parseFloat(result.rows[0].pending_amount) || 0,
+        totalPaid: parseFloat(result.rows[0].total_paid) || 0
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.getClientStatistics:', error);
+      throw new Error(`Failed to get client invoice statistics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find invoices by rental
+   * @param {number} rentalId - Rental ID
+   * @param {Object} filters - Filter criteria
+   * @returns {Promise<Array>}
+   */
+  async findByRental(rentalId, filters = {}) {
+    try {
+      const { limit = 50 } = filters;
+      
+      const query = `
+        SELECT i.*, 
+               p.name as provider_company_name,
+               c.name as client_company_name
+        FROM invoices i
+        LEFT JOIN companies p ON i.provider_company_id = p.company_id
+        LEFT JOIN companies c ON i.client_company_id = c.company_id
+        WHERE i.rental_id = $1
+        ORDER BY i.issue_date DESC
+        LIMIT $2
+      `;
+      
+      const result = await this.db.query(query, [rentalId, limit]);
+      return result.rows.map(row => this.mapRowToEntity(row));
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.findByRental:', error);
+      throw new Error(`Failed to find invoices by rental: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get payment history for a rental
+   * @param {number} rentalId - Rental ID
+   * @returns {Promise<Array>}
+   */
+  async getPaymentHistory(rentalId) {
+    try {
+      const query = `
+        SELECT 
+          i.invoice_id,
+          i.invoice_number,
+          i.issue_date,
+          i.due_date,
+          i.total_amount,
+          i.paid_amount,
+          i.paid_date,
+          i.status,
+          i.payment_method
+        FROM invoices i
+        WHERE i.rental_id = $1 AND i.status = 'PAID'
+        ORDER BY i.paid_date DESC
+      `;
+      
+      const result = await this.db.query(query, [rentalId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.getPaymentHistory:', error);
+      throw new Error(`Failed to get payment history: ${error.message}`);
+    }
+  }
+
   // Private helper methods
+
+  /**
+   * Map database row to entity
+   * @param {Object} row - Database row
+   * @returns {Object} Mapped entity
+   */
+  mapRowToEntity(row) {
+    return {
+      invoiceId: row.invoice_id,
+      providerCompanyId: row.provider_company_id,
+      providerCompanyName: row.provider_company_name,
+      clientCompanyId: row.client_company_id,
+      clientCompanyName: row.client_company_name,
+      rentalId: row.rental_id,
+      invoiceNumber: row.invoice_number,
+      issueDate: row.issue_date,
+      dueDate: row.due_date,
+      subtotal: parseFloat(row.subtotal) || 0,
+      taxAmount: parseFloat(row.tax_amount) || 0,
+      totalAmount: parseFloat(row.total_amount) || 0,
+      paidAmount: parseFloat(row.paid_amount) || 0,
+      paidDate: row.paid_date,
+      status: row.status,
+      paymentMethod: row.payment_method,
+      description: row.description,
+      notes: row.notes,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
 
   /**
    * Convert camelCase to snake_case

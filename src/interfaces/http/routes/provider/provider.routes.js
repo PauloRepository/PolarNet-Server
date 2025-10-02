@@ -46,21 +46,17 @@ router.put('/maintenances/:id/complete', maintenancesController.completeMaintena
 
 // Rental management routes - Solo gestión de estados
 router.get('/rentals', rentalsController.getRentals.bind(rentalsController));
-router.get('/rentals/:id', rentalsController.getRentalDetails.bind(rentalsController));
+router.get('/rentals/:id', rentalsController.getRentalById.bind(rentalsController));
 router.post('/rentals', rentalsController.createRental.bind(rentalsController));
-router.put('/rentals/:id/terminate', rentalsController.terminateRental.bind(rentalsController));
+router.put('/rentals/:id', rentalsController.updateRentalStatus.bind(rentalsController));
 
 // Service Request management routes - CRUD básico + estados
 router.get('/service-requests', serviceRequestsController.getServiceRequests.bind(serviceRequestsController));
 router.get('/service-requests/:id', serviceRequestsController.getServiceRequestById.bind(serviceRequestsController));
-router.put('/service-requests/:id/assign', serviceRequestsController.assignServiceRequest.bind(serviceRequestsController));
 router.put('/service-requests/:id/status', serviceRequestsController.updateServiceRequestStatus.bind(serviceRequestsController));
-router.put('/service-requests/:id/start', serviceRequestsController.startServiceRequest.bind(serviceRequestsController));
-router.put('/service-requests/:id/complete', serviceRequestsController.completeServiceRequest.bind(serviceRequestsController));
 
 // Profile management routes - Solo lo básico
 router.get('/profile', profileController.getProfile.bind(profileController));
 router.put('/profile', profileController.updateProfile.bind(profileController));
-router.put('/profile/password', profileController.changePassword.bind(profileController));
 
 module.exports = router;

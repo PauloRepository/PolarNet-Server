@@ -21,7 +21,7 @@ class PostgreSQLUserRepository extends IUserRepository {
         SELECT 
           u.*,
           c.name as company_name,
-          c.company_type
+          c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
         WHERE u.email = $1
@@ -51,7 +51,7 @@ class PostgreSQLUserRepository extends IUserRepository {
         SELECT 
           u.*,
           c.name as company_name,
-          c.company_type
+          c.type as company_type
         FROM users u
         LEFT JOIN companies c ON u.company_id = c.company_id
         WHERE u.user_id = $1

@@ -31,6 +31,9 @@ const ProviderMaintenanceUseCase = require('../../application/use-cases/Provider
 const ProviderServiceRequestUseCase = require('../../application/use-cases/ProviderServiceRequestUseCase');
 const ProviderProfileUseCase = require('../../application/use-cases/ProviderProfileUseCase');
 
+// Infrastructure - Services
+const PDFService = require('../services/PDFService');
+
 /**
  * Configure and setup the Dependency Injection Container
  * @returns {DIContainer} Configured DI container
@@ -602,6 +605,11 @@ function configureDI() {
         }
       }
     };
+  });
+
+  // PDF Service
+  container.registerSingleton('generateInvoicePDF', () => {
+    return new PDFService();
   });
 
   // Configuration service

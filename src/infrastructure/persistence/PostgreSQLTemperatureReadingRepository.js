@@ -384,6 +384,198 @@ class PostgreSQLTemperatureReadingRepository extends ITemperatureReadingReposito
     }
   }
 
+  /**
+   * Get equipment analytics for temperature readings
+   * @param {number} equipmentId - Equipment ID
+   * @param {Object} filters - Date filters
+   * @returns {Promise<Object>}
+   */
+  async getEquipmentAnalytics(equipmentId, filters = {}) {
+    try {
+      const { dateFrom } = filters;
+      let whereClause = 'WHERE equipment_id = $1';
+      let queryParams = [equipmentId];
+      let paramCount = 1;
+
+      if (dateFrom) {
+        whereClause += ` AND timestamp >= $${++paramCount}`;
+        queryParams.push(dateFrom);
+      }
+
+      const query = `
+        SELECT 
+          COUNT(*) as total_readings,
+          AVG(value) as avg_temperature,
+          MIN(value) as min_temperature,
+          MAX(value) as max_temperature,
+          COUNT(CASE WHEN alert_triggered = true THEN 1 END) as alert_count,
+          COUNT(CASE WHEN status = 'CRITICAL' THEN 1 END) as critical_count,
+          MAX(timestamp) as last_reading_time,
+          MIN(timestamp) as first_reading_time
+        FROM temperature_readings 
+        ${whereClause}
+      `;
+      
+      const result = await this.db.query(query, queryParams);
+      
+      return {
+        totalReadings: parseInt(result.rows[0].total_readings) || 0,
+        avgTemperature: parseFloat(result.rows[0].avg_temperature) || 0,
+        minTemperature: parseFloat(result.rows[0].min_temperature) || 0,
+        maxTemperature: parseFloat(result.rows[0].max_temperature) || 0,
+        alertCount: parseInt(result.rows[0].alert_count) || 0,
+        criticalCount: parseInt(result.rows[0].critical_count) || 0,
+        lastReadingTime: result.rows[0].last_reading_time,
+        firstReadingTime: result.rows[0].first_reading_time
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLTemperatureReadingRepository.getEquipmentAnalytics:', error);
+      throw new Error(`Failed to get equipment analytics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Count alerts by equipment within a date range
+   * @param {number} equipmentId - Equipment ID
+   * @param {Object} filters - Date filters
+   * @returns {Promise<number>}
+   */
+  async countAlertsByEquipment(equipmentId, filters = {}) {
+    try {
+      const { dateFrom, dateTo } = filters;
+      let whereClause = 'WHERE equipment_id = $1 AND alert_triggered = true';
+      let queryParams = [equipmentId];
+      let paramCount = 1;
+
+      if (dateFrom) {
+        whereClause += ` AND timestamp >= $${++paramCount}`;
+        queryParams.push(dateFrom);
+      }
+
+      if (dateTo) {
+        whereClause += ` AND timestamp <= $${++paramCount}`;
+        queryParams.push(dateTo);
+      }
+
+      const query = `
+        SELECT COUNT(*) as alert_count
+        FROM temperature_readings 
+        ${whereClause}
+      `;
+      
+      const result = await this.db.query(query, queryParams);
+      return parseInt(result.rows[0].alert_count) || 0;
+    } catch (error) {
+      console.error('Error in PostgreSQLTemperatureReadingRepository.countAlertsByEquipment:', error);
+      throw new Error(`Failed to count alerts by equipment: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find alerts by equipment within a date range
+   * @param {number} equipmentId - Equipment ID
+   * @param {Object} filters - Date and pagination filters
+   * @returns {Promise<Object>}
+   */
+  async findAlertsByEquipment(equipmentId, filters = {}) {
+    try {
+      const { page = 1, limit = 20, dateFrom, dateTo } = filters;
+      const offset = (page - 1) * limit;
+      
+      let whereClause = 'WHERE equipment_id = $1 AND alert_triggered = true';
+      let queryParams = [equipmentId];
+      let paramCount = 1;
+
+      if (dateFrom) {
+        whereClause += ` AND timestamp >= $${++paramCount}`;
+        queryParams.push(dateFrom);
+      }
+
+      if (dateTo) {
+        whereClause += ` AND timestamp <= $${++paramCount}`;
+        queryParams.push(dateTo);
+      }
+
+      const query = `
+        SELECT *,
+               COUNT(*) OVER() as total_count
+        FROM temperature_readings 
+        ${whereClause}
+        ORDER BY timestamp DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+      
+      queryParams.push(limit, offset);
+      const result = await this.db.query(query, queryParams);
+      
+      return {
+        alerts: result.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0,
+          totalPages: result.rows.length > 0 ? Math.ceil(parseInt(result.rows[0].total_count) / limit) : 0
+        }
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLTemperatureReadingRepository.findAlertsByEquipment:', error);
+      throw new Error(`Failed to find alerts by equipment: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get hourly averages for equipment temperature readings
+   * @param {number} equipmentId - Equipment ID
+   * @param {Object} filters - Date filters
+   * @returns {Promise<Array>}
+   */
+  async getHourlyAverages(equipmentId, filters = {}) {
+    try {
+      const { dateFrom, dateTo } = filters;
+      let whereClause = 'WHERE equipment_id = $1';
+      let queryParams = [equipmentId];
+      let paramCount = 1;
+
+      if (dateFrom) {
+        whereClause += ` AND timestamp >= $${++paramCount}`;
+        queryParams.push(dateFrom);
+      }
+
+      if (dateTo) {
+        whereClause += ` AND timestamp <= $${++paramCount}`;
+        queryParams.push(dateTo);
+      }
+
+      const query = `
+        SELECT 
+          DATE_TRUNC('hour', timestamp) as hour,
+          AVG(value) as avg_temperature,
+          MIN(value) as min_temperature,
+          MAX(value) as max_temperature,
+          COUNT(*) as readings_count,
+          COUNT(CASE WHEN alert_triggered = true THEN 1 END) as alerts_count
+        FROM temperature_readings 
+        ${whereClause}
+        GROUP BY DATE_TRUNC('hour', timestamp)
+        ORDER BY hour
+      `;
+      
+      const result = await this.db.query(query, queryParams);
+      
+      return result.rows.map(row => ({
+        hour: row.hour,
+        avgTemperature: parseFloat(row.avg_temperature),
+        minTemperature: parseFloat(row.min_temperature),
+        maxTemperature: parseFloat(row.max_temperature),
+        readingsCount: parseInt(row.readings_count),
+        alertsCount: parseInt(row.alerts_count)
+      }));
+    } catch (error) {
+      console.error('Error in PostgreSQLTemperatureReadingRepository.getHourlyAverages:', error);
+      throw new Error(`Failed to get hourly averages: ${error.message}`);
+    }
+  }
+
   // Private helper methods
 
   /**
