@@ -477,6 +477,44 @@ class PostgreSQLInvoiceRepository extends IInvoiceRepository {
     }
   }
 
+  /**
+   * Get recent payments for provider (for dashboard activities)
+   * @param {number} providerCompanyId - Provider company ID
+   * @param {number} limit - Maximum number of payments to return
+   * @returns {Promise<Array>}
+   */
+  async getRecentPaymentsByProvider(providerCompanyId, limit = 10) {
+    try {
+      const query = `
+        SELECT 
+          i.*,
+          c.name as client_company_name
+        FROM invoices i
+        LEFT JOIN companies c ON i.client_company_id = c.company_id
+        WHERE i.provider_company_id = $1
+          AND i.status = 'PAID'
+          AND i.paid_date IS NOT NULL
+        ORDER BY i.paid_date DESC
+        LIMIT $2
+      `;
+      
+      const result = await this.db.query(query, [providerCompanyId, limit]);
+      
+      return result.rows.map(row => ({
+        invoiceId: row.invoice_id,
+        invoiceNumber: row.invoice_number,
+        clientCompanyName: row.client_company_name,
+        totalAmount: parseFloat(row.total_amount || 0),
+        paidDate: row.paid_date,
+        status: row.status
+      }));
+    } catch (error) {
+      console.error('Error in PostgreSQLInvoiceRepository.getRecentPaymentsByProvider:', error);
+      // Return empty array on error
+      return [];
+    }
+  }
+
   // Private helper methods
 
   /**

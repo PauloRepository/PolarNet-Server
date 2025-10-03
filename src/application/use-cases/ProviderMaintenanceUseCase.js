@@ -18,128 +18,25 @@ class ProviderMaintenanceUseCase {
    */
   async getMaintenances(providerId, filters) {
     try {
-      const {
-        page = 1,
-        limit = 20,
-        search = '',
-        status = '',
-        type = '',
-        priority = '',
-        technicianId = '',
-        equipmentId = '',
-        dateFrom = '',
-        dateTo = '',
-        sortBy = 'scheduledDate',
-        sortOrder = 'desc'
-      } = filters;
-
-      // Construir condiciones de filtro
-      const whereConditions = [`e.owner_company_id = ?`];
-      const params = [providerId];
-
-      if (search) {
-        whereConditions.push(`(
-          m.title ILIKE ? OR 
-          m.description ILIKE ? OR 
-          e.name ILIKE ? OR
-          c.name ILIKE ?
-        )`);
-        const searchPattern = `%${search}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+      if (!providerId) {
+        throw new Error('Provider ID is required');
       }
 
-      if (status) {
-        whereConditions.push('m.status = ?');
-        params.push(status);
-      }
-
-      if (type) {
-        whereConditions.push('m.type = ?');
-        params.push(type);
-      }
-
-      if (priority) {
-        whereConditions.push('m.priority = ?');
-        params.push(priority);
-      }
-
-      if (technicianId) {
-        whereConditions.push('m.technician_id = ?');
-        params.push(technicianId);
-      }
-
-      if (equipmentId) {
-        whereConditions.push('m.equipment_id = ?');
-        params.push(equipmentId);
-      }
-
-      if (dateFrom) {
-        whereConditions.push('m.scheduled_date >= ?');
-        params.push(dateFrom);
-      }
-
-      if (dateTo) {
-        whereConditions.push('m.scheduled_date <= ?');
-        params.push(dateTo);
-      }
-
-      const whereClause = whereConditions.join(' AND ');
-      const orderClause = `ORDER BY m.${sortBy} ${sortOrder.toUpperCase()}`;
-
-      // Consulta principal con JOIN para obtener datos relacionados
-      const query = `
-        SELECT 
-          m.*,
-          e.name as equipment_name,
-          e.type as equipment_type,
-          e.model as equipment_model,
-          e.serial_number,
-          u.first_name || ' ' || u.last_name as technician_name,
-          u.email as technician_email,
-          u.phone as technician_phone,
-          c.name as client_company_name,
-          c.contact_person as client_contact_person,
-          loc.name as location_name,
-          loc.address as location_address
-        FROM maintenances m
-        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
-        LEFT JOIN users u ON m.technician_id = u.user_id
-        LEFT JOIN companies c ON e.current_location_company_id = c.company_id
-        LEFT JOIN locations loc ON e.current_location_id = loc.location_id
-        WHERE ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `;
-
-      const offset = (page - 1) * limit;
-      params.push(limit, offset);
-
-      const maintenances = await this.maintenanceRepository.executeQuery(query, params);
-
-      // Consulta para contar total de registros
-      const countQuery = `
-        SELECT COUNT(*) as total
-        FROM maintenances m
-        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
-        WHERE ${whereClause}
-      `;
-
-      const countParams = params.slice(0, -2); // Remover limit y offset
-      const countResult = await this.maintenanceRepository.executeQuery(countQuery, countParams);
-      const total = parseInt(countResult[0]?.total || 0);
-
+      // Use the maintenance repository to get provider maintenances
+      const result = await this.maintenanceRepository.findByProvider(providerId, filters);
+      
       return {
-        data: maintenances,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / limit)
+        maintenances: result.maintenances || [],
+        pagination: result.pagination || {
+          page: 1,
+          limit: 20,
+          total: 0,
+          pages: 0
         }
       };
     } catch (error) {
       console.error('Error in ProviderMaintenanceUseCase.getMaintenances:', error);
-      throw new Error('Error al obtener los mantenimientos');
+      throw new Error(`Failed to get maintenances: ${error.message}`);
     }
   }
 
@@ -159,18 +56,18 @@ class ProviderMaintenanceUseCase {
       }
 
       // Obtener datos del equipo
-      const equipment = await this.equipmentRepository.findById(maintenance.equipmentId);
+      const equipment = await this.equipmentRepository.findById(maintenance.equipment_id);
 
       // Obtener datos del técnico
       let technician = null;
-      if (maintenance.technicianId) {
-        technician = await this.userRepository.findById(maintenance.technicianId);
+      if (maintenance.technician_id) {
+        technician = await this.userRepository.findById(maintenance.technician_id);
       }
 
       // Obtener datos del cliente
       let client = null;
-      if (equipment?.currentLocationCompanyId) {
-        client = await this.clientRepository.findById(equipment.currentLocationCompanyId);
+      if (equipment?.current_location_company_id) {
+        client = await this.clientRepository.findById(equipment.current_location_company_id);
       }
 
       // Obtener partes utilizadas

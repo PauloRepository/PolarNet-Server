@@ -157,7 +157,7 @@ class ProviderMaintenanceResponseDTO {
           operationalHours: equipment.operationalHours
         }
       },
-      technician: {
+      technician: technician ? {
         id: technician.userId,
         personal: {
           name: `${technician.firstName} ${technician.lastName}`,
@@ -174,8 +174,8 @@ class ProviderMaintenanceResponseDTO {
           averageRating: parseFloat(technician.averageRating || 0),
           onTimeCompletion: parseFloat(technician.onTimeCompletion || 0)
         }
-      },
-      client: {
+      } : null,
+      client: client ? {
         company: {
           id: client.companyId,
           name: client.name,
@@ -189,7 +189,7 @@ class ProviderMaintenanceResponseDTO {
           email: client.contactEmail,
           phone: client.contactPhone
         }
-      },
+      } : null,
       costs: {
         breakdown: {
           laborCost: parseFloat(maintenance.laborCost || 0),

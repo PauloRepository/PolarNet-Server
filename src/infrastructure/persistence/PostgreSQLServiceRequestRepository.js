@@ -417,6 +417,51 @@ class PostgreSQLServiceRequestRepository extends IServiceRequestRepository {
       technicianName: row.technician_name
     });
   }
+
+  /**
+   * Get recent service requests for provider (for dashboard activities)
+   * @param {number} providerCompanyId - Provider company ID
+   * @param {number} limit - Maximum number of activities to return
+   * @returns {Promise<Array>}
+   */
+  async getRecentByProvider(providerCompanyId, limit = 10) {
+    try {
+      const query = `
+        SELECT 
+          sr.*,
+          c.name as client_company_name,
+          e.name as equipment_name,
+          u.name as technician_name
+        FROM service_requests sr
+        LEFT JOIN companies c ON sr.client_company_id = c.company_id
+        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
+        WHERE sr.provider_company_id = $1
+        ORDER BY sr.created_at DESC
+        LIMIT $2
+      `;
+      
+      const result = await this.db.query(query, [providerCompanyId, limit]);
+      
+      return result.rows.map(row => ({
+        id: row.service_request_id,
+        type: 'service_request',
+        title: row.title || 'Service Request',
+        description: row.description || 'Service request details',
+        status: row.status,
+        priority: row.priority,
+        date: row.created_at,
+        clientName: row.client_company_name,
+        equipmentName: row.equipment_name,
+        technicianName: row.technician_name,
+        estimatedCost: parseFloat(row.estimated_cost || 0)
+      }));
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.getRecentByProvider:', error);
+      // Return empty array on error
+      return [];
+    }
+  }
 }
 
 module.exports = PostgreSQLServiceRequestRepository;

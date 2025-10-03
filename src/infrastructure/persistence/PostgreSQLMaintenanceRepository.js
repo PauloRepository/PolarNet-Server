@@ -21,7 +21,7 @@ class PostgreSQLMaintenanceRepository extends IMaintenanceRepository {
       const { page = 1, limit = 20, status = '', type = '' } = filters;
       const offset = (page - 1) * limit;
 
-      let whereClause = 'WHERE m.provider_company_id = $1';
+      let whereClause = 'WHERE e.owner_company_id = $1';
       let queryParams = [providerId];
       let paramCount = 1;
 
@@ -41,11 +41,10 @@ class PostgreSQLMaintenanceRepository extends IMaintenanceRepository {
           e.name as equipment_name,
           e.serial_number as equipment_serial,
           c.name as client_company_name,
-          u.first_name as technician_first_name,
-          u.last_name as technician_last_name,
+          u.name as technician_name,
           COUNT(*) OVER() as total_count
         FROM maintenances m
-        LEFT JOIN equipments e ON m.equipment_id = e.equipment_id
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
         LEFT JOIN companies c ON m.client_company_id = c.company_id
         LEFT JOIN users u ON m.technician_id = u.user_id
         ${whereClause}
@@ -85,13 +84,12 @@ class PostgreSQLMaintenanceRepository extends IMaintenanceRepository {
           e.name as equipment_name,
           e.serial_number as equipment_serial,
           c.name as client_company_name,
-          u.first_name as technician_first_name,
-          u.last_name as technician_last_name
+          u.name as technician_name
         FROM maintenances m
-        LEFT JOIN equipments e ON m.equipment_id = e.equipment_id
+        INNER JOIN equipments e ON m.equipment_id = e.equipment_id
         LEFT JOIN companies c ON m.client_company_id = c.company_id
         LEFT JOIN users u ON m.technician_id = u.user_id
-        WHERE m.maintenance_id = $1 AND m.provider_company_id = $2
+        WHERE m.maintenance_id = $1 AND e.owner_company_id = $2
       `;
       
       const result = await this.db.query(query, [maintenanceId, providerId]);
@@ -105,6 +103,16 @@ class PostgreSQLMaintenanceRepository extends IMaintenanceRepository {
       console.error('Error in PostgreSQLMaintenanceRepository.findById:', error);
       throw new Error(`Failed to find maintenance by ID: ${error.message}`);
     }
+  }
+
+  /**
+   * Find maintenance by ID and Provider (alias for findById)
+   * @param {number} maintenanceId - Maintenance ID
+   * @param {number} providerId - Provider company ID
+   * @returns {Promise<Object|null>}
+   */
+  async findByIdAndProvider(maintenanceId, providerId) {
+    return this.findById(maintenanceId, providerId);
   }
 
   /**
@@ -231,6 +239,125 @@ class PostgreSQLMaintenanceRepository extends IMaintenanceRepository {
     } catch (error) {
       console.error('Error in PostgreSQLMaintenanceRepository.getProviderStatistics:', error);
       throw new Error(`Failed to get maintenance statistics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get maintenance parts
+   * @param {number} maintenanceId - Maintenance ID
+   * @returns {Promise<Array>}
+   */
+  async getMaintenanceParts(maintenanceId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'maintenance_parts'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          mp.*,
+          p.name as part_name,
+          p.part_number,
+          p.price as unit_price
+        FROM maintenance_parts mp
+        LEFT JOIN parts p ON mp.part_id = p.part_id
+        WHERE mp.maintenance_id = $1
+        ORDER BY mp.created_at
+      `;
+      
+      const result = await this.db.query(query, [maintenanceId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLMaintenanceRepository.getMaintenanceParts:', error);
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Get maintenance work logs
+   * @param {number} maintenanceId - Maintenance ID
+   * @returns {Promise<Array>}
+   */
+  async getMaintenanceWorkLogs(maintenanceId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'maintenance_work_logs'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          mwl.*,
+          u.name as technician_name
+        FROM maintenance_work_logs mwl
+        LEFT JOIN users u ON mwl.technician_id = u.user_id
+        WHERE mwl.maintenance_id = $1
+        ORDER BY mwl.created_at
+      `;
+      
+      const result = await this.db.query(query, [maintenanceId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLMaintenanceRepository.getMaintenanceWorkLogs:', error);
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Get maintenance photos
+   * @param {number} maintenanceId - Maintenance ID
+   * @returns {Promise<Array>}
+   */
+  async getMaintenancePhotos(maintenanceId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'maintenance_photos'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          mp.*,
+          u.name as uploaded_by_name
+        FROM maintenance_photos mp
+        LEFT JOIN users u ON mp.uploaded_by = u.user_id
+        WHERE mp.maintenance_id = $1
+        ORDER BY mp.created_at
+      `;
+      
+      const result = await this.db.query(query, [maintenanceId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLMaintenanceRepository.getMaintenancePhotos:', error);
+      return []; // Return empty array on error
     }
   }
 

@@ -43,7 +43,7 @@ class GetProviderDashboardUseCase {
         this.equipmentRepository.getProviderStatistics(providerCompanyId),
         this.activeRentalRepository.getProviderStatistics(providerCompanyId),
         this.serviceRequestRepository.getProviderStatistics(providerCompanyId),
-        this.invoiceRepository.getProviderRevenueSummary(providerCompanyId),
+        this.invoiceRepository.getProviderStatistics(providerCompanyId),
         this.temperatureReadingRepository.getProviderAlertsSummary(providerCompanyId)
       ]);
 
@@ -59,9 +59,9 @@ class GetProviderDashboardUseCase {
         serviceRequests: serviceMetrics.totalRequests || 0,
         pendingServices: serviceMetrics.pendingServices || 0,
         completedServices: serviceMetrics.completedServices || 0,
-        monthlyRevenue: parseFloat(revenueMetrics.monthlyRevenue || 0),
+        monthlyRevenue: parseFloat(revenueMetrics.totalRevenue || 0), // TODO: Implement actual monthly calculation
         totalRevenue: parseFloat(revenueMetrics.totalRevenue || 0),
-        pendingPayments: parseFloat(revenueMetrics.pendingPayments || 0),
+        pendingPayments: parseFloat(revenueMetrics.pendingRevenue || 0),
         criticalAlerts: alertsMetrics.criticalAlerts || 0,
         warningAlerts: alertsMetrics.warningAlerts || 0,
         totalClients: rentalMetrics.totalClients || 0,
@@ -162,23 +162,42 @@ class GetProviderDashboardUseCase {
         throw new Error('Provider company ID is required');
       }
 
+      // Use existing methods instead of non-existing ones
       const [
         equipmentStats,
         revenueStats,
         clientStats,
         alertStats
       ] = await Promise.all([
-        this.equipmentRepository.getProviderEquipmentBreakdown(providerCompanyId),
-        this.invoiceRepository.getProviderRevenueAnalytics(providerCompanyId),
-        this.activeRentalRepository.getProviderClientAnalytics(providerCompanyId),
-        this.temperatureReadingRepository.getProviderAlertsBreakdown(providerCompanyId)
+        this.equipmentRepository.getProviderStatistics(providerCompanyId),
+        this.invoiceRepository.getProviderStatistics(providerCompanyId),
+        this.activeRentalRepository.getProviderStatistics(providerCompanyId),
+        this.temperatureReadingRepository.getProviderAlertsSummary(providerCompanyId)
       ]);
 
       const stats = {
-        equipmentBreakdown: equipmentStats,
-        revenueAnalytics: revenueStats,
-        clientAnalytics: clientStats,
-        alertsBreakdown: alertStats
+        equipmentBreakdown: {
+          total: equipmentStats.totalEquipments || 0,
+          available: equipmentStats.availableEquipments || 0,
+          rented: equipmentStats.rentedEquipments || 0,
+          maintenance: equipmentStats.maintenanceEquipments || 0
+        },
+        revenueAnalytics: {
+          totalRevenue: revenueStats.totalRevenue || 0,
+          paidRevenue: revenueStats.paidRevenue || 0,
+          pendingRevenue: revenueStats.pendingRevenue || 0,
+          totalInvoices: revenueStats.totalInvoices || 0
+        },
+        clientAnalytics: {
+          totalClients: clientStats.totalClients || 0,
+          activeClients: clientStats.activeClients || 0,
+          newClients: clientStats.newClientsThisMonth || 0
+        },
+        alertsBreakdown: {
+          critical: alertStats.criticalAlerts || 0,
+          warning: alertStats.warningAlerts || 0,
+          total: alertStats.totalAlerts || 0
+        }
       };
 
       return ProviderDashboardResponseDTO.formatProviderStats(stats);

@@ -162,7 +162,7 @@ class ProviderEquipmentResponseDTO {
    * @param {Object} summary - Raw summary data
    * @returns {Object} Formatted summary
    */
-  static formatEquipmentSummary(summary) {
+  static formatEquipmentStatistics(summary) {
     return {
       totals: {
         totalEquipments: parseInt(summary.totalEquipments || 0),

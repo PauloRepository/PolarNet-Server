@@ -39,7 +39,7 @@ class ProviderClientsController {
         sortOrder
       };
 
-      const result = await this.clientsUseCase.getClients(providerId, filters);
+      const result = await this.clientsUseCase.getClientsList(providerId, filters);
       const formattedResult = this.ResponseDTO.formatClientsList(result);
 
       return ResponseHandler.success(res, formattedResult, 'Clients retrieved successfully');
@@ -62,7 +62,7 @@ class ProviderClientsController {
         return ResponseHandler.error(res, 'Client ID is required', 400);
       }
 
-      const clientData = await this.clientsUseCase.getClientDetails(providerId, clientId);
+      const clientData = await this.clientsUseCase.getClientDetails(clientId, providerId);
       const formattedResult = this.ResponseDTO.formatClientDetails(clientData);
 
       return ResponseHandler.success(res, formattedResult, 'Client details retrieved successfully');

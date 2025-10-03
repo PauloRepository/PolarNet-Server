@@ -576,6 +576,42 @@ class PostgreSQLTemperatureReadingRepository extends ITemperatureReadingReposito
     }
   }
 
+  /**
+   * Get alerts summary for provider
+   * @param {number} providerCompanyId - Provider company ID
+   * @returns {Promise<Object>}
+   */
+  async getProviderAlertsSummary(providerCompanyId) {
+    try {
+      const query = `
+        SELECT 
+          COUNT(CASE WHEN tr.alert_triggered = true AND tr.value > 10 THEN 1 END) as critical_alerts,
+          COUNT(CASE WHEN tr.alert_triggered = true AND tr.value <= 10 THEN 1 END) as warning_alerts,
+          COUNT(CASE WHEN tr.alert_triggered = true THEN 1 END) as total_alerts
+        FROM temperature_readings tr
+        LEFT JOIN equipments e ON tr.equipment_id = e.equipment_id
+        WHERE e.owner_company_id = $1
+          AND tr.timestamp >= CURRENT_DATE - INTERVAL '7 days'
+      `;
+      
+      const result = await this.db.query(query, [providerCompanyId]);
+      
+      return {
+        criticalAlerts: parseInt(result.rows[0].critical_alerts) || 0,
+        warningAlerts: parseInt(result.rows[0].warning_alerts) || 0,
+        totalAlerts: parseInt(result.rows[0].total_alerts) || 0
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLTemperatureReadingRepository.getProviderAlertsSummary:', error);
+      // Return default values on error
+      return {
+        criticalAlerts: 0,
+        warningAlerts: 0,
+        totalAlerts: 0
+      };
+    }
+  }
+
   // Private helper methods
 
   /**
