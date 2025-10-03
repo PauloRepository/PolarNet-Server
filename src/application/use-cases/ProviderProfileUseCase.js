@@ -32,16 +32,96 @@ class ProviderProfileUseCase {
       }
 
       // Obtener configuraciones
-      const settings = await this.settingsRepository.getProviderSettings(companyId);
+      let settings = {};
+      if (this.settingsRepository) {
+        try {
+          settings = await this.settingsRepository.getProviderSettings(companyId);
+        } catch (error) {
+          console.warn('Warning: Could not fetch provider settings:', error.message);
+          settings = {}; // Default empty settings
+        }
+      } else {
+        console.warn('Warning: settingsRepository not available, using default settings');
+        settings = {
+          // Default settings structure
+          operatingHours: {},
+          serviceRadius: 50,
+          emergencyService: false,
+          autoAcceptOrders: false,
+          minimumOrderValue: 0,
+          emailNotifications: true,
+          smsNotifications: false,
+          pushNotifications: true,
+          marketingEmails: false,
+          reportFrequency: 'monthly',
+          defaultHourlyRate: 0,
+          emergencyRateMultiplier: 1.5,
+          minimumCalloutFee: 0,
+          travelRatePerKm: 0,
+          requirePhotoEvidence: false,
+          customerApprovalRequired: true,
+          qualityChecklistRequired: false,
+          followUpPeriod: 7
+        };
+      }
 
       // Obtener estadísticas
-      const statistics = await this.statisticsRepository.getProviderStatistics(companyId);
+      let statistics = {};
+      if (this.statisticsRepository) {
+        try {
+          statistics = await this.statisticsRepository.getProviderStatistics(companyId);
+        } catch (error) {
+          console.warn('Warning: Could not fetch provider statistics:', error.message);
+          statistics = {}; // Default empty statistics
+        }
+      } else {
+        console.warn('Warning: statisticsRepository not available, using default statistics');
+        statistics = {
+          // Default statistics structure
+          totalServiceRequests: 0,
+          completedServiceRequests: 0,
+          pendingServiceRequests: 0,
+          totalRevenue: 0,
+          averageRating: 0,
+          totalClients: 0,
+          activeContracts: 0,
+          equipmentManaged: 0,
+          responseTime: {
+            average: 0,
+            target: 24
+          },
+          completionRate: 0,
+          customerSatisfaction: 0
+        };
+      }
 
       // Obtener certificaciones
-      const certifications = await this.companyRepository.getCertifications(companyId);
+      let certifications = [];
+      try {
+        if (this.companyRepository.getCertifications) {
+          certifications = await this.companyRepository.getCertifications(companyId);
+        } else {
+          console.warn('Warning: getCertifications method not available in companyRepository');
+          certifications = [];
+        }
+      } catch (error) {
+        console.warn('Warning: Could not fetch certifications:', error.message);
+        certifications = [];
+      }
 
       // Obtener miembros del equipo
-      const team = await this.userRepository.getTeamMembers(companyId);
+      let team = [];
+      try {
+        if (this.userRepository.getTeamMembers) {
+          team = await this.userRepository.getTeamMembers(companyId);
+        } else {
+          console.warn('Warning: getTeamMembers method not available in userRepository');
+          team = [];
+        }
+      } catch (error) {
+        console.warn('Warning: Could not fetch team members:', error.message);
+        team = [];
+      }
 
       return {
         user,
@@ -258,12 +338,45 @@ class ProviderProfileUseCase {
         updatedBy
       };
 
+      if (!this.settingsRepository) {
+        throw new Error('Settings repository not available. Cannot update settings.');
+      }
+
       await this.settingsRepository.updateProviderSettings(companyId, settings);
       
       return await this.settingsRepository.getProviderSettings(companyId);
     } catch (error) {
       console.error('Error in ProviderProfileUseCase.updateSettings:', error);
       throw new Error(error.message || 'Error al actualizar las configuraciones');
+    }
+  }
+
+  /**
+   * Actualizar perfil completo (usuario y compañía)
+   * @param {string} userId - ID del usuario
+   * @param {string} companyId - ID de la compañía
+   * @param {Object} updateData - Datos de actualización con campos de usuario y compañía
+   * @returns {Object} Perfil actualizado completo
+   */
+  async updateProfile(userId, companyId, updateData) {
+    try {
+      const { user: userData = {}, company: companyData = {} } = updateData;
+
+      // Actualizar datos del usuario si se proporcionaron
+      if (Object.keys(userData).length > 0) {
+        await this.updateUser(userId, userData);
+      }
+
+      // Actualizar datos de la compañía si se proporcionaron  
+      if (Object.keys(companyData).length > 0) {
+        await this.updateCompany(companyId, companyData);
+      }
+
+      // Obtener el perfil actualizado completo
+      return await this.getProfile(userId, companyId);
+    } catch (error) {
+      console.error('Error in ProviderProfileUseCase.updateProfile:', error);
+      throw new Error(error.message || 'Error al actualizar el perfil');
     }
   }
 
@@ -336,6 +449,10 @@ class ProviderProfileUseCase {
       const maxSize = 5 * 1024 * 1024; // 5MB
       if (file.size > maxSize) {
         throw new Error('El archivo es demasiado grande. Máximo 5MB');
+      }
+
+      if (!this.fileUploadService) {
+        throw new Error('File upload service not available. Cannot upload logo.');
       }
 
       // Subir archivo

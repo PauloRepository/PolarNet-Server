@@ -21,7 +21,7 @@ class ProviderProfileController {
       const providerId = req.user.companyId;
       const userId = req.user.userId;
 
-      const profileData = await this.profileUseCase.getProviderProfile(providerId, userId);
+      const profileData = await this.profileUseCase.getProfile(userId, providerId);
       const formattedResult = this.ResponseDTO.formatProfileDetails(profileData);
 
       return ResponseHandler.success(res, formattedResult, 'Perfil del proveedor obtenido exitosamente');
@@ -98,7 +98,7 @@ class ProviderProfileController {
         updatedBy: userId
       };
 
-      const result = await this.profileUseCase.updateProviderProfile(providerId, userId, updateData);
+      const result = await this.profileUseCase.updateProfile(userId, providerId, updateData);
       const formattedResult = this.ResponseDTO.formatProfileDetails(result);
 
       return ResponseHandler.success(res, formattedResult, 'Perfil actualizado exitosamente');

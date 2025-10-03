@@ -40,11 +40,11 @@ class ProviderRentalsUseCase {
       } = filters;
 
       const rentalFilters = {
+        providerId: providerCompanyId, // Cambiar el nombre del parámetro
         page: parseInt(page),
         limit: parseInt(limit),
         sortBy,
-        sortOrder,
-        providerCompanyId
+        sortOrder
       };
 
       if (status) rentalFilters.status = status;

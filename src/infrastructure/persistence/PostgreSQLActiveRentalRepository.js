@@ -522,6 +522,85 @@ class PostgreSQLActiveRentalRepository extends IActiveRentalRepository {
     }
   }
 
+  /**
+   * Find rentals with pagination (alias for provider-specific search)
+   * @param {Object} filters - Filter criteria including providerId and pagination
+   * @returns {Promise<Object>} Object with rentals array and pagination info
+   */
+  async findWithPagination(filters = {}) {
+    try {
+      const { providerId, page = 1, limit = 20, status, equipmentType, dateFrom, dateTo } = filters;
+      
+      if (!providerId) {
+        throw new Error('Provider ID is required');
+      }
+
+      const offset = (page - 1) * limit;
+      let whereConditions = ['ar.provider_company_id = $1'];
+      let queryParams = [providerId];
+      let paramCount = 1;
+
+      if (status) {
+        whereConditions.push(`ar.status = $${++paramCount}`);
+        queryParams.push(status);
+      }
+
+      if (equipmentType) {
+        whereConditions.push(`e.type = $${++paramCount}`);
+        queryParams.push(equipmentType);
+      }
+
+      if (dateFrom) {
+        whereConditions.push(`ar.start_date >= $${++paramCount}`);
+        queryParams.push(dateFrom);
+      }
+
+      if (dateTo) {
+        whereConditions.push(`ar.end_date <= $${++paramCount}`);
+        queryParams.push(dateTo);
+      }
+
+      const whereClause = whereConditions.join(' AND ');
+
+      // Main query with pagination
+      const query = `
+        SELECT ar.*, 
+               ce.name as client_company_name,
+               pe.name as provider_company_name,
+               e.serial_number, e.type as equipment_type, e.model,
+               COUNT(*) OVER() as total_count
+        FROM active_rentals ar
+        LEFT JOIN companies ce ON ar.client_company_id = ce.company_id
+        LEFT JOIN companies pe ON ar.provider_company_id = pe.company_id
+        LEFT JOIN equipments e ON ar.equipment_id = e.equipment_id
+        WHERE ${whereClause}
+        ORDER BY ar.created_at DESC
+        LIMIT $${++paramCount} OFFSET $${++paramCount}
+      `;
+
+      queryParams.push(limit, offset);
+      const result = await this.db.query(query, queryParams);
+
+      const rentals = result.rows.map(row => this.mapRowToEntity(row));
+      const total = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+
+      return {
+        rentals,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1
+        }
+      };
+    } catch (error) {
+      console.error('Error in PostgreSQLActiveRentalRepository.findWithPagination:', error);
+      throw new Error(`Failed to find rentals with pagination: ${error.message}`);
+    }
+  }
+
   // Private helper methods
 
   /**

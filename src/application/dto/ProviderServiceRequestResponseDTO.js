@@ -19,8 +19,8 @@ class ProviderServiceRequestResponseDTO {
         limit: pagination.limit || 20,
         total: pagination.total || 0,
         pages: pagination.pages || 0,
-        hasNext: pagination.page < pagination.pages,
-        hasPrev: pagination.page > 1
+        hasNext: (pagination.page || 0) < (pagination.pages || 0),
+        hasPrev: (pagination.page || 0) > 1
       },
       summary: {
         totalRequests: pagination.total || 0,
@@ -153,65 +153,65 @@ class ProviderServiceRequestResponseDTO {
       },
       client: {
         company: {
-          id: client.companyId,
-          name: client.name,
-          type: client.type,
-          email: client.email,
-          phone: client.phone,
-          address: client.address
+          id: client.companyId || null,
+          name: client.name || null,
+          type: client.type || null,
+          email: client.email || null,
+          phone: client.phone || null,
+          address: client.address || null
         },
         contact: {
-          person: client.contactPerson,
-          email: client.contactEmail,
-          phone: client.contactPhone,
-          role: client.contactRole
+          person: client.contactPerson || null,
+          email: client.contactEmail || null,
+          phone: client.contactPhone || null,
+          role: client.contactRole || null
         },
         preferences: {
-          preferredContactMethod: client.preferredContactMethod,
-          availableHours: client.availableHours,
-          specialInstructions: client.specialInstructions
+          preferredContactMethod: client.preferredContactMethod || null,
+          availableHours: client.availableHours || null,
+          specialInstructions: client.specialInstructions || null
         }
       },
       equipment: {
-        id: equipment.equipmentId,
+        id: equipment.equipmentId || null,
         details: {
-          name: equipment.name,
-          type: equipment.type,
-          category: equipment.category,
-          model: equipment.model,
-          serialNumber: equipment.serialNumber,
-          manufacturer: equipment.manufacturer
+          name: equipment.name || null,
+          type: equipment.type || null,
+          category: equipment.category || null,
+          model: equipment.model || null,
+          serialNumber: equipment.serialNumber || null,
+          manufacturer: equipment.manufacturer || null
         },
         location: {
-          locationId: equipment.locationId,
-          name: equipment.locationName,
-          address: equipment.locationAddress,
-          coordinates: equipment.coordinates
+          locationId: equipment.locationId || null,
+          name: equipment.locationName || null,
+          address: equipment.locationAddress || null,
+          coordinates: equipment.coordinates || null
         },
         condition: {
-          status: equipment.status,
-          condition: equipment.condition,
-          lastMaintenanceDate: equipment.lastMaintenanceDate,
-          warrantyStatus: equipment.warrantyStatus
+          status: equipment.status || null,
+          condition: equipment.condition || null,
+          lastMaintenanceDate: equipment.lastMaintenanceDate || null,
+          warrantyStatus: equipment.warrantyStatus || null
         },
         history: {
-          installationDate: equipment.installationDate,
-          operationalHours: equipment.operationalHours,
-          previousIssues: equipment.previousIssues
+          installationDate: equipment.installationDate || null,
+          operationalHours: equipment.operationalHours || null,
+          previousIssues: equipment.previousIssues || null
         }
       },
       technician: {
-        id: technician.userId,
+        id: technician.userId || null,
         personal: {
-          name: `${technician.firstName} ${technician.lastName}`,
-          email: technician.email,
-          phone: technician.phone
+          name: `${technician.firstName || ''} ${technician.lastName || ''}`.trim() || null,
+          email: technician.email || null,
+          phone: technician.phone || null
         },
         professional: {
-          specializations: technician.specializations,
-          certifications: technician.certifications,
-          experienceYears: technician.experienceYears,
-          serviceArea: technician.serviceArea
+          specializations: technician.specializations || null,
+          certifications: technician.certifications || null,
+          experienceYears: technician.experienceYears || null,
+          serviceArea: technician.serviceArea || null
         },
         performance: {
           completedServices: technician.completedServices || 0,

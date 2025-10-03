@@ -19,135 +19,25 @@ class ProviderServiceRequestUseCase {
    */
   async getServiceRequests(providerId, filters) {
     try {
-      const {
-        page = 1,
-        limit = 20,
-        search = '',
-        status = '',
-        priority = '',
-        issueType = '',
-        technicianId = '',
-        clientId = '',
-        equipmentId = '',
-        dateFrom = '',
-        dateTo = '',
-        sortBy = 'requestDate',
-        sortOrder = 'desc'
-      } = filters;
-
-      // Construir condiciones de filtro
-      const whereConditions = [`sr.provider_company_id = ?`];
-      const params = [providerId];
-
-      if (search) {
-        whereConditions.push(`(
-          sr.title ILIKE ? OR 
-          sr.description ILIKE ? OR 
-          e.name ILIKE ? OR
-          c.name ILIKE ?
-        )`);
-        const searchPattern = `%${search}%`;
-        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+      if (!providerId) {
+        throw new Error('Provider ID is required');
       }
 
-      if (status) {
-        whereConditions.push('sr.status = ?');
-        params.push(status);
-      }
-
-      if (priority) {
-        whereConditions.push('sr.priority = ?');
-        params.push(priority);
-      }
-
-      if (issueType) {
-        whereConditions.push('sr.issue_type = ?');
-        params.push(issueType);
-      }
-
-      if (technicianId) {
-        whereConditions.push('sr.assigned_technician_id = ?');
-        params.push(technicianId);
-      }
-
-      if (clientId) {
-        whereConditions.push('sr.client_company_id = ?');
-        params.push(clientId);
-      }
-
-      if (equipmentId) {
-        whereConditions.push('sr.equipment_id = ?');
-        params.push(equipmentId);
-      }
-
-      if (dateFrom) {
-        whereConditions.push('sr.request_date >= ?');
-        params.push(dateFrom);
-      }
-
-      if (dateTo) {
-        whereConditions.push('sr.request_date <= ?');
-        params.push(dateTo);
-      }
-
-      const whereClause = whereConditions.join(' AND ');
-      const orderClause = `ORDER BY sr.${this.mapSortField(sortBy)} ${sortOrder.toUpperCase()}`;
-
-      // Consulta principal con JOIN para obtener datos relacionados
-      const query = `
-        SELECT 
-          sr.*,
-          e.name as equipment_name,
-          e.type as equipment_type,
-          e.model as equipment_model,
-          e.serial_number,
-          u.first_name || ' ' || u.last_name as technician_name,
-          u.email as technician_email,
-          u.phone as technician_phone,
-          c.name as client_company_name,
-          c.contact_person as contact_person,
-          c.contact_email,
-          c.contact_phone,
-          loc.name as location_name,
-          loc.address as location_address
-        FROM service_requests sr
-        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
-        LEFT JOIN users u ON sr.assigned_technician_id = u.user_id
-        LEFT JOIN companies c ON sr.client_company_id = c.company_id
-        LEFT JOIN locations loc ON sr.location_id = loc.location_id
-        WHERE ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `;
-
-      const offset = (page - 1) * limit;
-      params.push(limit, offset);
-
-      const serviceRequests = await this.serviceRequestRepository.executeQuery(query, params);
-
-      // Consulta para contar total de registros
-      const countQuery = `
-        SELECT COUNT(*) as total
-        FROM service_requests sr
-        WHERE ${whereClause}
-      `;
-
-      const countParams = params.slice(0, -2); // Remover limit y offset
-      const countResult = await this.serviceRequestRepository.executeQuery(countQuery, countParams);
-      const total = parseInt(countResult[0]?.total || 0);
-
+      // Use the existing repository method
+      const result = await this.serviceRequestRepository.findByProvider(providerId, filters);
+      
       return {
-        data: serviceRequests,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / limit)
+        serviceRequests: result.serviceRequests || result.data || [],
+        pagination: result.pagination || {
+          page: 1,
+          limit: 20,
+          total: 0,
+          pages: 0
         }
       };
     } catch (error) {
       console.error('Error in ProviderServiceRequestUseCase.getServiceRequests:', error);
-      throw new Error('Error al obtener las solicitudes de servicio');
+      throw new Error(`Failed to get service requests: ${error.message}`);
     }
   }
 
@@ -166,20 +56,71 @@ class ProviderServiceRequestUseCase {
         throw new Error('Solicitud de servicio no encontrada');
       }
 
-      // Obtener datos del equipo
+      // Obtener datos del equipo (ya incluidos en la consulta del repository)
       let equipment = null;
-      if (serviceRequest.equipmentId) {
-        equipment = await this.equipmentRepository.findById(serviceRequest.equipmentId);
+      if (serviceRequest.equipment_id) {
+        equipment = {
+          equipmentId: serviceRequest.equipment_id,
+          name: serviceRequest.equipment_name || null,
+          serialNumber: serviceRequest.equipment_serial || null,
+          type: null, // No disponible en la consulta actual
+          category: null, // No disponible en la consulta actual
+          model: null, // No disponible en la consulta actual
+          manufacturer: null, // No disponible en la consulta actual
+          locationId: null, // No disponible en la consulta actual
+          locationName: null, // No disponible en la consulta actual
+          locationAddress: null, // No disponible en la consulta actual
+          coordinates: null, // No disponible en la consulta actual
+          status: null, // No disponible en la consulta actual
+          condition: null, // No disponible en la consulta actual
+          lastMaintenanceDate: null, // No disponible en la consulta actual
+          warrantyStatus: null, // No disponible en la consulta actual
+          installationDate: null, // No disponible en la consulta actual
+          operationalHours: null, // No disponible en la consulta actual
+          previousIssues: null // No disponible en la consulta actual
+        };
       }
 
-      // Obtener datos del técnico asignado
+      // Obtener datos del técnico asignado (ya incluidos en la consulta del repository)
       let technician = null;
-      if (serviceRequest.assignedTechnicianId) {
-        technician = await this.userRepository.findById(serviceRequest.assignedTechnicianId);
+      if (serviceRequest.assigned_technician_id || serviceRequest.technician_id) {
+        const technicianId = serviceRequest.assigned_technician_id || serviceRequest.technician_id;
+        technician = {
+          userId: technicianId,
+          firstName: serviceRequest.technician_name ? serviceRequest.technician_name.split(' ')[0] : '',
+          lastName: serviceRequest.technician_name ? serviceRequest.technician_name.split(' ').slice(1).join(' ') : '',
+          email: null, // No disponible en la consulta actual
+          phone: null, // No disponible en la consulta actual
+          specializations: null, // No disponible en la consulta actual
+          certifications: null, // No disponible en la consulta actual
+          experienceYears: null, // No disponible en la consulta actual
+          serviceArea: null, // No disponible en la consulta actual
+          completedServices: null, // No disponible en la consulta actual
+          averageRating: null, // No disponible en la consulta actual
+          averageResponseTime: null, // No disponible en la consulta actual
+          onTimeCompletion: null // No disponible en la consulta actual
+        };
       }
 
-      // Obtener datos del cliente
-      const client = await this.clientRepository.findById(serviceRequest.clientCompanyId);
+      // Obtener datos del cliente (ya incluidos en la consulta del repository)
+      let client = null;
+      if (serviceRequest.client_company_id) {
+        client = {
+          companyId: serviceRequest.client_company_id,
+          name: serviceRequest.client_company_name || null,
+          type: null, // No disponible en la consulta actual
+          email: null, // No disponible en la consulta actual
+          phone: null, // No disponible en la consulta actual
+          address: null, // No disponible en la consulta actual
+          contactPerson: null, // No disponible en la consulta actual
+          contactEmail: null, // No disponible en la consulta actual
+          contactPhone: null, // No disponible en la consulta actual
+          contactRole: null, // No disponible en la consulta actual
+          preferredContactMethod: null, // No disponible en la consulta actual
+          availableHours: null, // No disponible en la consulta actual
+          specialInstructions: null // No disponible en la consulta actual
+        };
+      }
 
       // Obtener registros de trabajo
       const workLogs = await this.serviceRequestRepository.getServiceRequestWorkLogs(serviceRequestId);

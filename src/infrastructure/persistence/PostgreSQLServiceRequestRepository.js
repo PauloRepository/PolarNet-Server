@@ -54,7 +54,7 @@ class PostgreSQLServiceRequestRepository extends IServiceRequestRepository {
       const { page = 1, limit = 20, status = '', priority = '' } = filters;
       const offset = (page - 1) * limit;
 
-      let whereClause = 'WHERE sr.provider_company_id = $1';
+      let whereClause = 'WHERE e.owner_company_id = $1';
       let queryParams = [providerId];
       let paramCount = 1;
 
@@ -459,6 +459,253 @@ class PostgreSQLServiceRequestRepository extends IServiceRequestRepository {
     } catch (error) {
       console.error('Error in PostgreSQLServiceRequestRepository.getRecentByProvider:', error);
       // Return empty array on error
+      return [];
+    }
+  }
+
+  /**
+   * Find service requests by rental ID
+   * @param {number} rentalId - Rental ID
+   * @returns {Promise<Array>} Array of service requests for the rental
+   */
+  async findByRental(rentalId) {
+    try {
+      const query = `
+        SELECT 
+          sr.*,
+          e.name as equipment_name,
+          e.serial_number as equipment_serial,
+          e.type as equipment_type,
+          c.name as client_company_name,
+          u.name as technician_name
+        FROM service_requests sr
+        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN companies c ON sr.client_company_id = c.company_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
+        LEFT JOIN active_rentals ar ON e.equipment_id = ar.equipment_id
+        WHERE ar.rental_id = $1
+        ORDER BY sr.created_at DESC
+      `;
+      
+      const result = await this.db.query(query, [rentalId]);
+      
+      return result.rows.map(row => ({
+        serviceRequestId: row.service_request_id,
+        title: row.title,
+        description: row.description,
+        issueType: row.issue_type,
+        priority: row.priority,
+        status: row.status,
+        equipmentId: row.equipment_id,
+        equipmentName: row.equipment_name,
+        equipmentSerial: row.equipment_serial,
+        equipmentType: row.equipment_type,
+        clientCompanyId: row.client_company_id,
+        clientCompanyName: row.client_company_name,
+        technicianId: row.technician_id,
+        technicianName: row.technician_name,
+        estimatedCost: parseFloat(row.estimated_cost || 0),
+        actualCost: parseFloat(row.actual_cost || 0),
+        scheduledDate: row.scheduled_date,
+        completedDate: row.completed_date,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.findByRental:', error);
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Find service request by ID and provider (verify ownership)
+   * @param {number} serviceRequestId - Service request ID
+   * @param {number} providerId - Provider ID
+   * @returns {Promise<Object|null>}
+   */
+  async findByIdAndProvider(serviceRequestId, providerId) {
+    try {
+      const query = `
+        SELECT 
+          sr.*,
+          e.name as equipment_name,
+          e.serial_number as equipment_serial,
+          c.name as client_company_name,
+          u.name as technician_name
+        FROM service_requests sr
+        LEFT JOIN equipments e ON sr.equipment_id = e.equipment_id
+        LEFT JOIN companies c ON sr.client_company_id = c.company_id
+        LEFT JOIN users u ON sr.technician_id = u.user_id
+        WHERE sr.service_request_id = $1 
+        AND e.owner_company_id = $2
+      `;
+      
+      const result = await this.db.query(query, [serviceRequestId, providerId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.findByIdAndProvider:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get service request work logs
+   * @param {number} serviceRequestId - Service request ID
+   * @returns {Promise<Array>}
+   */
+  async getServiceRequestWorkLogs(serviceRequestId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'service_request_work_logs'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          srwl.*,
+          u.name as technician_name
+        FROM service_request_work_logs srwl
+        LEFT JOIN users u ON srwl.technician_id = u.user_id
+        WHERE srwl.service_request_id = $1
+        ORDER BY srwl.created_at
+      `;
+      
+      const result = await this.db.query(query, [serviceRequestId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.getServiceRequestWorkLogs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get service request parts
+   * @param {number} serviceRequestId - Service request ID
+   * @returns {Promise<Array>}
+   */
+  async getServiceRequestParts(serviceRequestId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'service_request_parts'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          srp.*,
+          p.name as part_name,
+          p.part_number
+        FROM service_request_parts srp
+        LEFT JOIN parts p ON srp.part_id = p.part_id
+        WHERE srp.service_request_id = $1
+        ORDER BY srp.created_at
+      `;
+      
+      const result = await this.db.query(query, [serviceRequestId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.getServiceRequestParts:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get service request photos
+   * @param {number} serviceRequestId - Service request ID
+   * @returns {Promise<Array>}
+   */
+  async getServiceRequestPhotos(serviceRequestId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'service_request_photos'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          srp.*,
+          u.name as uploaded_by_name
+        FROM service_request_photos srp
+        LEFT JOIN users u ON srp.uploaded_by = u.user_id
+        WHERE srp.service_request_id = $1
+        ORDER BY srp.created_at
+      `;
+      
+      const result = await this.db.query(query, [serviceRequestId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.getServiceRequestPhotos:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get service request communications
+   * @param {number} serviceRequestId - Service request ID
+   * @returns {Promise<Array>}
+   */
+  async getServiceRequestCommunications(serviceRequestId) {
+    try {
+      // Check if table exists first
+      const tableCheckQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'service_request_communications'
+        );
+      `;
+      
+      const tableCheck = await this.db.query(tableCheckQuery);
+      if (!tableCheck.rows[0].exists) {
+        return []; // Return empty array if table doesn't exist
+      }
+
+      const query = `
+        SELECT 
+          src.*,
+          u.name as sender_name
+        FROM service_request_communications src
+        LEFT JOIN users u ON src.sender_id = u.user_id
+        WHERE src.service_request_id = $1
+        ORDER BY src.created_at
+      `;
+      
+      const result = await this.db.query(query, [serviceRequestId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in PostgreSQLServiceRequestRepository.getServiceRequestCommunications:', error);
       return [];
     }
   }
