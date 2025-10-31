@@ -1,7 +1,6 @@
 databases:
   - name: polarnet-db
     databaseName: polarnet_db
-    user: postgres
     plan: free
 
 services:
