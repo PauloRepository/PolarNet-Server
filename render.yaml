@@ -1,0 +1,50 @@
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: polarnet-db
+    env: docker
+    plan: free
+    region: oregon
+    databases:
+      - name: polarnet_db
+        user: postgres
+
+  # Backend API
+  - type: web
+    name: polarnet-backend
+    env: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DB_HOST
+        fromDatabase:
+          name: polarnet-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: polarnet-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: polarnet-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: polarnet-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: polarnet-db
+          property: password
+      - key: DB_SSL
+        value: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
