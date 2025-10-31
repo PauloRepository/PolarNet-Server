@@ -1,19 +1,14 @@
-services:
-  # PostgreSQL Database
-  - type: pserv
-    name: polarnet-db
-    env: docker
+databases:
+  - name: polarnet-db
+    databaseName: polarnet_db
+    user: postgres
     plan: free
-    region: oregon
-    databases:
-      - name: polarnet_db
-        user: postgres
 
+services:
   # Backend API
   - type: web
     name: polarnet-backend
     env: docker
-    region: oregon
     plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
@@ -21,7 +16,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3000
+        value: 10000
       - key: DB_HOST
         fromDatabase:
           name: polarnet-db

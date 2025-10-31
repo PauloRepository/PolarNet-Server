@@ -13,8 +13,8 @@ RUN npm ci --only=production
 # Copiar el código fuente
 COPY . .
 
-# Exponer el puerto
-EXPOSE 3000
+# Exponer el puerto (Render usa la variable PORT)
+EXPOSE $PORT
 
 # Comando para iniciar la aplicación
 CMD ["node", "src/main.js"]
