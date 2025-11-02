@@ -17,7 +17,7 @@ const authenticate = async (req, res, next) => {
 
     try {
       // Validate token directly with JWT using same secret as auth controller
-      const secret = process.env.JWT_SECRET || 'tu_jwt_secret_muy_seguro_aqui_cambialo_en_produccion';
+      const secret = process.env.JWT_SECRET || 'your_jwt_secret_here';
       const decoded = jwt.verify(token, secret);
       
       // Agregar datos del usuario al request
