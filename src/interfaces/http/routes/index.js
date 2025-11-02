@@ -19,7 +19,12 @@ router.get('/health', (req, res) => {
     service: 'PolarNet API',
     version: '2.0.0',
     architecture: 'DDD - 100% Pure Structure',
-    message: 'Servidor funcionando con arquitectura DDD y endpoints restaurados'
+    message: 'Servidor funcionando con arquitectura DDD y endpoints restaurados',
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      hasDbConfig: !!process.env.DB_HOST,
+    }
   });
 });
 

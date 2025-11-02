@@ -12,7 +12,8 @@ const generateToken = (userId, role, companyId = null) => {
     companyId
   };
   
-  return jwt.sign(payload, process.env.JWT_SECRET, {
+  const jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret_here';
+  return jwt.sign(payload, jwtSecret, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   });
 };
