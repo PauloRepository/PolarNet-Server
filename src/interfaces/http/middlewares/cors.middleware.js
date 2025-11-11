@@ -3,6 +3,7 @@ const cors = require('cors');
 
 // Orígenes permitidos para CORS
 const allowedOrigins = [
+  // URLs de desarrollo local
   "capacitor://localhost",
   "ionic://localhost", 
   "http://localhost",
@@ -12,8 +13,14 @@ const allowedOrigins = [
   "http://localhost:8000",
   "http://localhost:8080",
   "http://localhost:8100",
-  process.env.CORS_ORIGIN || "*"
-];
+  // URLs de producción
+  "https://polarnet-client.netlify.app", // Frontend desplegado
+  "https://polarnet-server.onrender.com", // Backend desplegado
+  // Variable de entorno para orígenes adicionales
+  process.env.CORS_ORIGIN,
+  process.env.FRONTEND_URL,
+  process.env.BACKEND_URL
+].filter(Boolean); // Filtrar valores undefined/null
 
 // Middleware CORS manual para máxima compatibilidad
 const corsHeaders = (req, res, next) => {
